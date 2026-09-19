@@ -149,6 +149,22 @@ describe('TriNetra Enterprise API Integration Tests', () => {
       return Promise.resolve(mockReports.length);
     });
 
+    jest.spyOn(Report, 'aggregate').mockImplementation((pipeline) => {
+      return Promise.resolve([
+        {
+          region: 'Gujarat',
+          jurisdiction: 'Gujarat',
+          state: 'Gujarat',
+          totalAudits: 5,
+          compliantCount: 4,
+          violationCount: 1,
+          reviewCount: 0,
+          penalties: 25000,
+          passRate: 80,
+        },
+      ]);
+    });
+
     jest.spyOn(User, 'countDocuments').mockImplementation(() => {
       return Promise.resolve(mockUsers.length);
     });
@@ -490,6 +506,25 @@ describe('TriNetra Enterprise API Integration Tests', () => {
       expect(res.body.counts).toHaveProperty('users');
       expect(res.body.counts).toHaveProperty('reports');
       expect(Array.isArray(res.body.latestReports)).toBe(true);
+    });
+  });
+
+  // =============================================================
+  // 5. REGIONAL ANALYTICS TEST SUITE (/api/analytics/regions)
+  // =============================================================
+  describe('Regional Analytics Route (/api/analytics/regions)', () => {
+    test('GET /api/analytics/regions - Successfully returns grouped regional metrics from MongoDB pipeline', async () => {
+      const res = await request(app).get('/api/analytics/regions');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.regions)).toBe(true);
+      expect(res.body.regions.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.regions[0].region).toBe('Gujarat');
+      expect(res.body.regions[0].totalAudits).toBe(5);
+      expect(res.body.regions[0].compliantCount).toBe(4);
+      expect(res.body.regions[0].violationCount).toBe(1);
+      expect(res.body.regions[0].penalties).toBe(25000);
+      expect(res.body.regions[0].passRate).toBe(80);
     });
   });
 });

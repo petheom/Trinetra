@@ -592,7 +592,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {adminFilteredLogs.length === 0 ? (
+                  {isLoadingReports ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        <RefreshCw className="h-6 w-6 mx-auto mb-2 text-blue-600 animate-spin" />
+                        <span className="block font-semibold text-slate-700 text-xs">
+                          Querying live inspection ledger from MongoDB...
+                        </span>
+                      </td>
+                    </tr>
+                  ) : adminFilteredLogs.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-10 text-center text-slate-400">
                         <MapPin className="h-6 w-6 mx-auto mb-2 text-slate-300" />
@@ -605,10 +614,10 @@ export default function Dashboard() {
                       </td>
                     </tr>
                   ) : (
-                    adminFilteredLogs.map((log) => {
+                    adminFilteredLogs.map((log, idx) => {
                       const isPass = log.status === 'Pass' || log.verdict === 'Compliant';
                       return (
-                        <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                        <tr key={log.id || (log as any)._id || `admin-log-${idx}`} className="hover:bg-slate-50/80 transition-colors">
                           {/* Officer Name & Badge */}
                           <td className="py-3.5 px-3">
                             <span className="font-bold text-slate-900 block">{log.officerName}</span>
@@ -958,7 +967,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {officerFilteredCategoryLogs.length === 0 ? (
+                  {isLoadingReports ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <RefreshCw className="h-6 w-6 mx-auto mb-2 text-blue-600 animate-spin" />
+                        <span className="block font-semibold text-slate-700 text-xs">
+                          Loading your inspection records from MongoDB...
+                        </span>
+                      </td>
+                    </tr>
+                  ) : officerFilteredCategoryLogs.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-12 text-center text-slate-400">
                         <Scale className="h-8 w-8 mx-auto mb-2 text-slate-300" />
@@ -971,10 +989,10 @@ export default function Dashboard() {
                       </td>
                     </tr>
                   ) : (
-                    officerFilteredCategoryLogs.map((log) => {
+                    officerFilteredCategoryLogs.map((log, idx) => {
                       const isPass = log.status === 'Pass' || log.verdict === 'Compliant';
                       return (
-                        <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
+                        <tr key={log.id || (log as any)._id || `officer-log-${idx}`} className="hover:bg-slate-50/70 transition-colors">
                           {/* Shop Name */}
                           <td className="py-3.5 px-3 max-w-[200px]">
                             <span className="font-bold text-slate-900 block truncate" title={log.shopName || log.productName}>

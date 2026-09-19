@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import { analyzePackagingText } from '../services/rulesEngine.js';
 
 /**
@@ -26,33 +26,54 @@ export const analyzeProductImage = async (req, res, next) => {
       imageSource = Buffer.from(base64Data, 'base64');
     }
 
-    // 2. Pre-process image with sharp to dramatically improve OCR legibility:
-    //    - Auto-rotate according to EXIF orientation
-    //    - Resize canvas to high definition (max 2200px) so fine print text is sharply separated
-    //    - Convert to Grayscale to remove background color noise
-    //    - Normalize contrast across the full dynamic range
-    //    - Sharpen edges of text characters
+    // 2. Pre-process image with sharp:
+    //    - ONLY apply grayscale and normalization to remove packaging color noise and maximize contrast
+    //    - Preserve 100% of original dimensions and aspect ratio (NO resizing, NO cropping)
     let processedBuffer = imageSource;
     try {
       processedBuffer = await sharp(imageSource)
         .rotate()
-        .resize({ width: 2200, withoutEnlargement: false, fit: 'inside' })
         .grayscale()
         .normalize()
-        .sharpen({ sigma: 1.2, m1: 1.5, m2: 0.7 })
         .toBuffer();
     } catch (sharpError) {
       console.warn('[Sharp Preprocessing Warning]: Falling back to original image buffer:', sharpError.message);
       processedBuffer = imageSource;
     }
 
-    // 3. Initialize Tesseract OCR worker
+    // 3. Initialize Tesseract OCR worker with optimal Page Segmentation Mode (PSM)
+    //    PSM 4 (SINGLE_COLUMN): Assumes a single column of text of variable sizes.
+    //    This scans the entire label from top to bottom, preventing truncation of bottom blocks (Customer Care, Batch, etc.)
     worker = await createWorker('eng');
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_COLUMN, // PSM 4
+    });
 
     // 4. Perform OCR recognition on enhanced image buffer
-    const ret = await worker.recognize(processedBuffer);
-    const extractedText = (ret.data && ret.data.text) ? String(ret.data.text) : '';
-    const confidence = (ret.data && typeof ret.data.confidence === 'number') ? ret.data.confidence : 0;
+    let ret = await worker.recognize(processedBuffer);
+    let extractedText = (ret.data && ret.data.text) ? String(ret.data.text) : '';
+    let confidence = (ret.data && typeof ret.data.confidence === 'number') ? ret.data.confidence : 0;
+
+    // If PSM 4 yields sparse text or low confidence, retry with PSM 11 (SPARSE_TEXT)
+    // to find as much text as possible in disparate blocks without premature cutoff
+    if (confidence < 50 || extractedText.trim().length < 25) {
+      try {
+        await worker.setParameters({
+          tessedit_pageseg_mode: PSM.SPARSE_TEXT, // PSM 11
+        });
+        const fallbackRet = await worker.recognize(processedBuffer);
+        const fallbackText = (fallbackRet.data && fallbackRet.data.text) ? String(fallbackRet.data.text) : '';
+        const fallbackConfidence = (fallbackRet.data && typeof fallbackRet.data.confidence === 'number') ? fallbackRet.data.confidence : 0;
+
+        if (fallbackConfidence > confidence || fallbackText.trim().length > extractedText.trim().length) {
+          ret = fallbackRet;
+          extractedText = fallbackText;
+          confidence = fallbackConfidence;
+        }
+      } catch (psmFallbackErr) {
+        console.warn('[Tesseract PSM Fallback Warning]:', psmFallbackErr.message);
+      }
+    }
 
     // 5. Terminate worker to free memory
     await worker.terminate();

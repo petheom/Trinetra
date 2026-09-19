@@ -359,10 +359,37 @@ export const inspectionAPI = {
   },
 
   /**
+   * Fetch dynamic regional analytics aggregated directly from MongoDB
+   */
+  getRegionalAnalytics: async () => {
+    const response = await api.get('/api/analytics/regions');
+    return response.data;
+  },
+
+  /**
    * Fetch a single inspection record by ID
    */
   getReportById: async (id: string) => {
     const response = await api.get(`/api/inspections/${id}`);
+    return response.data;
+  },
+};
+
+export interface RegionMetric {
+  region: string;
+  jurisdiction?: string;
+  state?: string;
+  totalAudits: number;
+  compliantCount: number;
+  violationCount: number;
+  reviewCount?: number;
+  penalties: number;
+  passRate: number;
+}
+
+export const analyticsAPI = {
+  getRegionalAnalytics: async () => {
+    const response = await api.get('/api/analytics/regions');
     return response.data;
   },
 };

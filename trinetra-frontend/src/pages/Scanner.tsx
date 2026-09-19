@@ -531,7 +531,7 @@ export default function Scanner() {
   // -------------------------------------------------------------
   const handleDownloadOfficialPdf = () => {
     if (!analysisResult) {
-      alert('No inspection analysis available to generate report.');
+      showToast('No inspection analysis available to generate report.', 'error');
       return;
     }
 

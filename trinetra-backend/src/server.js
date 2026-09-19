@@ -7,6 +7,7 @@ import inspectionRoutes from './routes/inspectionRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import scannerRoutes from './routes/scannerRoutes.js';
 import debugRoutes from './routes/debugRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
 // Load environment variables
@@ -61,6 +62,7 @@ app.use('/api/inspections', inspectionRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/scanner', scannerRoutes);
 app.use('/api/debug', debugRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Error Handling Middleware
 app.use(notFound);
