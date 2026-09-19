@@ -13,10 +13,10 @@ import {
   LogIn,
   TriangleAlert,
   Briefcase,
+  UserCheck,
 } from 'lucide-react';
-import { useTriNetra } from '../context/TriNetraContext';
+import { useTriNetra, type UserRole } from '../context/TriNetraContext';
 import { authAPI } from '../utils/api';
-import type { RegisteredOfficer } from '../constants/seedUsers';
 
 interface LoginProps {
   initialMode?: 'login' | 'register';
@@ -34,9 +34,12 @@ export default function Login({ initialMode }: LoginProps = {}) {
     }
   }, [initialMode, location.pathname, navigate]);
 
-  // Pre-filled Default Testing Credentials for seamless developer & tester onboarding
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  // Role Selection State: explicitly selected role before logging in
+  const [selectedRole, setSelectedRole] = useState<UserRole | ''>('');
+
+  // Empty credentials - user manually enters credentials
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState<string>(() => {
@@ -48,6 +51,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
     const stateObj = location.state as {
       registeredBadge?: string;
       registeredUsername?: string;
+      registeredRole?: UserRole;
       message?: string;
     } | null;
 
@@ -57,6 +61,10 @@ export default function Login({ initialMode }: LoginProps = {}) {
       setUsername(stateObj.registeredBadge);
     }
 
+    if (stateObj?.registeredRole) {
+      setSelectedRole(stateObj.registeredRole);
+    }
+
     if (stateObj?.message) {
       setSuccessMessage(stateObj.message);
     }
@@ -64,56 +72,16 @@ export default function Login({ initialMode }: LoginProps = {}) {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-
-  // Google SSO Simulation
-  const handleGoogleLogin = () => {
-    setIsGoogleLoading(true);
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    setTimeout(() => {
-      try {
-        const googleOfficer: RegisteredOfficer = {
-          badgeId: 'GOOG-8821',
-          name: 'Google Verified Officer',
-          passwordHash: 'google_sso_token',
-          role: 'Field Officer',
-          region: 'Delhi (NCT)',
-        };
-
-        const activeSessionData = {
-          badgeId: googleOfficer.badgeId,
-          name: googleOfficer.name,
-          role: googleOfficer.role,
-          region: googleOfficer.region,
-          loginTime: new Date().toISOString(),
-        };
-
-        localStorage.setItem('activeSession', JSON.stringify(activeSessionData));
-        localStorage.setItem('trinetra_officer', JSON.stringify(activeSessionData));
-
-        login(
-          googleOfficer.badgeId,
-          googleOfficer.name,
-          googleOfficer.region,
-          googleOfficer.role
-        );
-
-        setIsGoogleLoading(false);
-        navigate('/dashboard', { replace: true });
-      } catch (err) {
-        console.error('Google login error:', err);
-        setErrorMessage('Failed to establish Google SSO session.');
-        setIsGoogleLoading(false);
-      }
-    }, 400);
-  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
+
+    if (!selectedRole) {
+      setErrorMessage('Please select your role: Admin or Field Officer.');
+      return;
+    }
 
     const trimmedUsername = username.trim();
     const trimmedPassword = password.trim();
@@ -130,11 +98,12 @@ export default function Login({ initialMode }: LoginProps = {}) {
     setIsLoading(true);
 
     try {
-      // 1. Attempt genuine authentication via Node.js Express API
+      // 1. Attempt genuine authentication via Node.js Express API with selected role
       const response = await authAPI.login({
         badgeId: trimmedUsername,
         username: trimmedUsername,
         password: trimmedPassword,
+        role: selectedRole,
       });
 
       if (response && response.success && response.user) {
@@ -260,100 +229,9 @@ export default function Login({ initialMode }: LoginProps = {}) {
             </Link>
           </div>
 
-          {/* Quick Test Credentials Presets */}
-          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 p-3 text-xs text-slate-700">
-            <div className="font-bold text-blue-900 flex items-center gap-1.5 mb-1.5">
-              <Briefcase className="h-3.5 w-3.5 text-blue-700" />
-              <span>Quick Test Credentials (Click to fill):</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('admin');
-                  setPassword('admin123');
-                  setErrorMessage('');
-                }}
-                className="text-left rounded-lg bg-white p-2 border border-blue-200/80 hover:border-blue-400 transition hover:shadow-xs cursor-pointer"
-              >
-                <div className="font-bold text-blue-900 flex items-center justify-between">
-                  <span>Admin Role</span>
-                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded">Preset</span>
-                </div>
-                <div className="font-mono text-slate-600 mt-0.5">user: admin</div>
-                <div className="font-mono text-slate-400 text-[10px]">pass: admin123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('officer');
-                  setPassword('GovPass#2026');
-                  setErrorMessage('');
-                }}
-                className="text-left rounded-lg bg-white p-2 border border-blue-200/80 hover:border-blue-400 transition hover:shadow-xs cursor-pointer"
-              >
-                <div className="font-bold text-emerald-900 flex items-center justify-between">
-                  <span>Field Officer</span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded">Preset</span>
-                </div>
-                <div className="font-mono text-slate-600 mt-0.5">user: officer</div>
-                <div className="font-mono text-slate-400 text-[10px]">pass: GovPass#2026</div>
-              </button>
-            </div>
-          </div>
-
-          {/* Google Sign In Button */}
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={handleGoogleLogin}
-              disabled={isGoogleLoading || isLoading}
-              className="flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white py-2.5 px-4 text-xs font-bold text-slate-700 shadow-xs transition-all duration-200 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-            >
-              {isGoogleLoading ? (
-                <span className="animate-pulse">Connecting to Google Identity Service...</span>
-              ) : (
-                <>
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                    />
-                  </svg>
-                  <span>Sign In with Google</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-3 font-semibold text-slate-400 text-[10px]">
-                Or enter credentials
-              </span>
-            </div>
-          </div>
-
           {/* Success Message Alert */}
           {successMessage && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 animate-in fade-in">
+            <div className="mt-4 mb-2 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 animate-in fade-in">
               <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" />
               <span>{successMessage}</span>
             </div>
@@ -361,21 +239,118 @@ export default function Login({ initialMode }: LoginProps = {}) {
 
           {/* Error Message Alert */}
           {errorMessage && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 animate-in fade-in">
+            <div className="mt-4 mb-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 animate-in fade-in">
               <TriangleAlert className="h-4 w-4 shrink-0 text-rose-600" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* Standardized Credentials Form: Username + Password */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Standardized Credentials Form: Role + Username + Password */}
+          <form onSubmit={handleSubmit} autoComplete="off" className="mt-4 space-y-4">
+            {/* Explicit Role Selection (Admin vs Field Officer) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Select Your Role <span className="text-rose-500">*</span>
+                </label>
+                {selectedRole ? (
+                  <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    selectedRole === 'Admin'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${
+                      selectedRole === 'Admin' ? 'bg-rose-500' : 'bg-emerald-500'
+                    }`} />
+                    {selectedRole} Portal
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    Required for access
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* Field Officer Card */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('Field Officer');
+                    if (errorMessage.includes('role')) setErrorMessage('');
+                  }}
+                  className={`group relative flex flex-col items-start p-3 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+                    selectedRole === 'Field Officer'
+                      ? 'border-emerald-500 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20'
+                      : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100/70 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full mb-1.5">
+                    <div className={`p-1.5 rounded-xl transition-colors ${
+                      selectedRole === 'Field Officer'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-200/80 text-slate-600 group-hover:bg-slate-300'
+                    }`}>
+                      <UserCheck className="h-4 w-4" />
+                    </div>
+                    {selectedRole === 'Field Officer' && (
+                      <CircleCheck className="h-4 w-4 text-emerald-600 animate-in zoom-in-50" />
+                    )}
+                  </div>
+                  <div className={`text-xs font-bold ${
+                    selectedRole === 'Field Officer' ? 'text-emerald-950' : 'text-slate-800'
+                  }`}>
+                    Field Officer
+                  </div>
+                  <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
+                    Inspection & Scanner
+                  </div>
+                </button>
+
+                {/* Admin Card */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('Admin');
+                    if (errorMessage.includes('role')) setErrorMessage('');
+                  }}
+                  className={`group relative flex flex-col items-start p-3 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+                    selectedRole === 'Admin'
+                      ? 'border-rose-500 bg-rose-50/70 shadow-sm ring-2 ring-rose-500/20'
+                      : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100/70 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full mb-1.5">
+                    <div className={`p-1.5 rounded-xl transition-colors ${
+                      selectedRole === 'Admin'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-slate-200/80 text-slate-600 group-hover:bg-slate-300'
+                    }`}>
+                      <Briefcase className="h-4 w-4" />
+                    </div>
+                    {selectedRole === 'Admin' && (
+                      <CircleCheck className="h-4 w-4 text-rose-600 animate-in zoom-in-50" />
+                    )}
+                  </div>
+                  <div className={`text-xs font-bold ${
+                    selectedRole === 'Admin' ? 'text-rose-950' : 'text-slate-800'
+                  }`}>
+                    Admin
+                  </div>
+                  <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
+                    National Oversight
+                  </div>
+                </button>
+              </div>
+            </div>
+
             {/* Standard Username / Email Input */}
             <div>
               <label
                 htmlFor="login-username"
                 className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
               >
-                Username or Email
+                Username or Badge ID <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
@@ -385,12 +360,13 @@ export default function Login({ initialMode }: LoginProps = {}) {
                   id="login-username"
                   type="text"
                   required
+                  autoComplete="off"
                   value={username}
                   onChange={(e) => {
                     setUsername(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g. admin or officer"
+                  placeholder="e.g., om or INSP-GJ-2041"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-2.5 pl-10 pr-3 text-xs font-medium text-slate-900 shadow-xs transition hover:border-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
@@ -412,6 +388,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
                   id="login-password"
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="off"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
@@ -443,7 +420,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={isLoading || isGoogleLoading}
+                disabled={isLoading}
                 className="group relative flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 px-4 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
               >
                 <span>

@@ -116,8 +116,20 @@ function RoleProtectedRoute({ allowedRoles }: RoleProtectedRouteProps) {
   const activeRole = getActiveRole(officer?.role);
 
   if (!allowedRoles.includes(activeRole)) {
-    // Redirect unauthorized user safely back to dashboard
-    return <Navigate to="/dashboard" replace />;
+    // Redirect unauthorized user safely back to dashboard with explicit Access Denied state
+    return (
+      <Navigate
+        to="/dashboard"
+        replace
+        state={{
+          accessDenied: true,
+          message:
+            activeRole === 'Admin'
+              ? 'Access Denied: The OCR Packaging Scanner & Inspection workflows are restricted to Field Officers.'
+              : 'Access Denied: Administrative Command Center is restricted to authorized Administrators.',
+        }}
+      />
+    );
   }
 
   return <Outlet />;
@@ -161,8 +173,8 @@ export default function App() {
                 {/* Common dashboard accessible to both roles */}
                 <Route path="/dashboard" element={<Dashboard />} />
 
-                {/* Field Operations & Packaging Inspection Routes (Accessible to Officers and Admins) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['Field Officer', 'Admin']} />}>
+                {/* Field Operations & Packaging Inspection Routes (Strictly Field Officer Only) */}
+                <Route element={<RoleProtectedRoute allowedRoles={['Field Officer']} />}>
                   <Route path="/scanner" element={<Scanner />} />
                   <Route path="/inspection" element={<Scanner />} />
                   <Route path="/verification" element={<Verification />} />

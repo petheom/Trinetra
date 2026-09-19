@@ -33,6 +33,32 @@ const reportSchema = new mongoose.Schema(
       type: String,
       default: 'Field Inspection Terminal',
     },
+    // Manual Inspection / On-site Verification Fields
+    shopName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    address: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    equipmentChecked: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      enum: ['Pass', 'Fail', 'Pending', 'Compliant', 'Non-Compliant'],
+      default: 'Pass',
+    },
+    remarks: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     productName: {
       type: String,
       default: 'Packaged Commodity',
@@ -50,7 +76,7 @@ const reportSchema = new mongoose.Schema(
     },
     extractedText: {
       type: String,
-      required: [true, 'Extracted OCR packaging text is required'],
+      default: '',
     },
     missingFields: {
       type: [String],
@@ -66,7 +92,7 @@ const reportSchema = new mongoose.Schema(
         values: ['Compliant', 'Non-Compliant', 'Manual Review'],
         message: '{VALUE} is not a valid statutory verdict. Must be Compliant, Non-Compliant, or Manual Review',
       },
-      required: [true, 'Compliance verdict is required'],
+      default: 'Compliant',
     },
     pdfDocumentUrl: {
       type: String,

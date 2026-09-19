@@ -18,7 +18,7 @@ import {
 import { useTriNetra, type UserRole } from '../context/TriNetraContext';
 import { authAPI } from '../utils/api';
 import { INDIAN_STATES, type IndianStateType } from '../constants/indianStates';
-import { DEFAULT_USERS, type RegisteredOfficer } from '../constants/seedUsers';
+import type { RegisteredOfficer } from '../constants/seedUsers';
 
 // Export REGIONS for backward compatibility across existing views
 export const REGIONS = INDIAN_STATES;
@@ -27,7 +27,7 @@ export type { RegisteredOfficer };
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { login, showToast } = useTriNetra();
+  const { showToast } = useTriNetra();
   const isSubmittingRef = useRef(false);
 
   // Form input fields
@@ -43,109 +43,6 @@ export default function Signup() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-
-
-
-  // Safe helper to read registered officers from localStorage ('users' array)
-  const getRegisteredAccounts = (): RegisteredOfficer[] => {
-    try {
-      const storedUsers = localStorage.getItem('users');
-      if (storedUsers) {
-        const parsed = JSON.parse(storedUsers);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-      const storedLegacy = localStorage.getItem('trinetra_registered_officers');
-      if (storedLegacy) {
-        const parsed = JSON.parse(storedLegacy);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse registered users from localStorage:', e);
-    }
-    // Seed default users if none found
-    try {
-      localStorage.setItem('users', JSON.stringify(DEFAULT_USERS));
-      localStorage.setItem('trinetra_registered_officers', JSON.stringify(DEFAULT_USERS));
-    } catch {}
-    return DEFAULT_USERS;
-  };
-
-  // Safe helper to persist account into localStorage with try-catch quota guard
-  const persistOfficerAccount = (
-    newOfficer: RegisteredOfficer
-  ): { success: boolean; error?: string } => {
-    try {
-      const current = getRegisteredAccounts();
-      const updated = [
-        ...current.filter((o) => String(o?.badgeId || '').toUpperCase() !== String(newOfficer.badgeId || '').toUpperCase()),
-        newOfficer,
-      ];
-      localStorage.setItem('users', JSON.stringify(updated));
-      localStorage.setItem('trinetra_registered_officers', JSON.stringify(updated));
-      return { success: true };
-    } catch (e) {
-      console.error('LocalStorage write failure:', e);
-      return {
-        success: false,
-        error:
-          'Unable to write to local storage. Your browser storage quota may be exceeded or private browsing restrictions may be enabled.',
-      };
-    }
-  };
-
-  // Google SSO Simulation
-  const handleGoogleSignup = () => {
-    setErrorMessage('');
-    setSuccessMessage('');
-    setIsGoogleLoading(true);
-    isSubmittingRef.current = true;
-
-    setTimeout(() => {
-      try {
-        const googleOfficer: RegisteredOfficer = {
-          badgeId: 'GOOG-8821',
-          name: 'Google Verified Officer',
-          passwordHash: 'google_sso_token',
-          role: role,
-          region: region || 'Gujarat',
-        };
-
-        const result = persistOfficerAccount(googleOfficer);
-        if (!result.success) {
-          setErrorMessage(result.error || 'Failed to persist Google SSO credentials.');
-          setIsGoogleLoading(false);
-          isSubmittingRef.current = false;
-          return;
-        }
-
-        try {
-          login(googleOfficer.badgeId, googleOfficer.name, googleOfficer.region, googleOfficer.role);
-        } catch (ctxErr) {
-          console.warn('Context login warning:', ctxErr);
-        }
-
-        setSuccessMessage('SSO Authentication verified! Launching terminal...');
-        setIsGoogleLoading(false);
-
-        setTimeout(() => {
-          navigate('/dashboard', {
-            replace: true,
-            state: { registeredBadge: googleOfficer.badgeId, officerName: googleOfficer.name },
-          });
-        }, 300);
-      } catch (err) {
-        console.error('Google SSO unexpected error:', err);
-        setErrorMessage('Failed to complete Single Sign-On registration. Please use the standard registration form.');
-        setIsGoogleLoading(false);
-        isSubmittingRef.current = false;
-      }
-    }, 600);
-  };
 
   // Main Form Submission Handler
   const handleSubmit = async (e: FormEvent) => {
@@ -166,12 +63,7 @@ export default function Signup() {
     }
 
     if (!trimmedId) {
-      setErrorMessage('Please provide an Officer / Admin Badge ID (e.g., INSP-GJ-2041 or ADMIN-HQ-01).');
-      return;
-    }
-
-    if (trimmedId.length < 3) {
-      setErrorMessage('Badge ID must be at least 3 characters long.');
+      setErrorMessage('Please provide a Username / Badge ID (e.g., om or dhoni).');
       return;
     }
 
@@ -208,6 +100,7 @@ export default function Signup() {
       const response = await authAPI.register({
         name: trimmedName,
         badgeId: trimmedId,
+        username: trimmedId,
         password: trimmedPassword,
         role: role === 'Admin' ? 'Admin' : 'Field Officer',
         region: trimmedRegion,
@@ -230,6 +123,7 @@ export default function Signup() {
             replace: true,
             state: {
               registeredBadge: trimmedId,
+              registeredRole: role,
               message: `Credentials enrolled for ${trimmedName} (${trimmedId}) as ${role} [${trimmedRegion}]! Please sign in.`,
             },
           });
@@ -239,50 +133,22 @@ export default function Signup() {
       throw new Error(response?.message || 'Enrollment rejected by server.');
     } catch (apiErr: any) {
       console.warn('[Signup] API error during registration:', apiErr);
-      const errMsg = apiErr?.message || 'Failed to enroll account with server.';
 
-      // If backend reports duplicate badge or validation issue
-      if (apiErr.status === 400) {
-        setErrorMessage(errMsg);
-        showToast(errMsg, 'error');
-        setIsLoading(false);
-        isSubmittingRef.current = false;
-        return;
-      }
+      // Extract exact server validation error message
+      const serverMessage =
+        apiErr?.response?.data?.message ||
+        apiErr?.data?.message ||
+        apiErr?.message ||
+        'Registration failed. Please check that the server is online and try again.';
 
-      // Offline fallback: Persist locally so developer testing is unblocked
-      try {
-        const newOfficer: RegisteredOfficer = {
-          badgeId: trimmedId,
-          name: trimmedName,
-          passwordHash: trimmedPassword,
-          role: role,
-          region: trimmedRegion,
-        };
-        persistOfficerAccount(newOfficer);
-        showToast('Enrolled in offline mode (Server is currently bootstrapping)', 'warning');
+      setErrorMessage(serverMessage);
+      showToast(serverMessage, 'error');
 
-        setSuccessMessage(
-          `Profile for ${trimmedName} (${trimmedId}) enrolled locally. Redirecting to login...`
-        );
+      // Explicit alert dialog to guarantee immediate user visibility
+      alert(apiErr?.response?.data?.message || apiErr?.data?.message || apiErr?.message || 'Registration failed');
 
-        setTimeout(() => {
-          setIsLoading(false);
-          isSubmittingRef.current = false;
-          navigate('/login', {
-            replace: true,
-            state: {
-              registeredBadge: trimmedId,
-              message: `Credentials enrolled for ${trimmedName} (${trimmedId})! Please sign in.`,
-            },
-          });
-        }, 600);
-      } catch {
-        setErrorMessage(errMsg);
-        showToast(errMsg, 'error');
-        setIsLoading(false);
-        isSubmittingRef.current = false;
-      }
+      setIsLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -345,7 +211,7 @@ export default function Signup() {
           )}
 
           {/* Registration Form */}
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <form onSubmit={handleSubmit} autoComplete="off" className="mt-6 space-y-4">
             {/* Full Name */}
             <div>
               <label htmlFor="signup-name" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -359,6 +225,7 @@ export default function Signup() {
                   id="signup-name"
                   type="text"
                   required
+                  autoComplete="off"
                   value={officerName}
                   onChange={(e) => {
                     setOfficerName(e.target.value);
@@ -370,10 +237,10 @@ export default function Signup() {
               </div>
             </div>
 
-            {/* Badge ID */}
+            {/* Username / Badge ID */}
             <div>
               <label htmlFor="signup-badge" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                Badge / Employee ID <span className="text-rose-500">*</span>
+                Username / Badge ID <span className="text-rose-500">*</span>
               </label>
               <div className="relative mt-1.5">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
@@ -383,12 +250,13 @@ export default function Signup() {
                   id="signup-badge"
                   type="text"
                   required
+                  autoComplete="off"
                   value={officerId}
                   onChange={(e) => {
                     setOfficerId(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g., INSP-GJ-2041 or ADMIN-HQ-01"
+                  placeholder="e.g., om or dhoni"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-4 text-xs font-semibold uppercase text-slate-900 shadow-xs transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
                 />
               </div>
@@ -458,12 +326,13 @@ export default function Signup() {
                   id="signup-password"
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="off"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="Minimum 4 characters"
+                  placeholder="Minimum 6 characters"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-10 text-xs font-semibold text-slate-900 shadow-xs transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
                 />
                 <button
@@ -491,6 +360,7 @@ export default function Signup() {
                   id="signup-confirm"
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="off"
                   value={confirmPassword}
                   onChange={(e) => {
                     setConfirmPassword(e.target.value);
@@ -502,10 +372,18 @@ export default function Signup() {
               </div>
             </div>
 
+            {/* Inline Error Banner immediately visible above Submit button */}
+            {errorMessage && (
+              <div className="flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50/95 p-3.5 text-xs text-rose-800 animate-in fade-in">
+                <TriangleAlert className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                <div className="leading-snug font-semibold">{errorMessage}</div>
+              </div>
+            )}
+
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading || isGoogleLoading}
+              disabled={isLoading}
               className="group mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3.5 px-4 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-500/25 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-blue-500/35 active:scale-95 focus:outline-none focus:ring-4 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? (
@@ -521,55 +399,6 @@ export default function Signup() {
               )}
             </button>
           </form>
-
-          {/* Divider */}
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Or Instant Enrollment
-              </span>
-            </div>
-          </div>
-
-          {/* Google SSO Button */}
-          <button
-            type="button"
-            disabled={isLoading || isGoogleLoading}
-            onClick={handleGoogleSignup}
-            className="flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white py-3 px-4 text-xs font-bold text-slate-700 shadow-xs transition-all duration-300 hover:bg-slate-50 hover:border-slate-300 hover:scale-[1.01] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isGoogleLoading ? (
-              <>
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
-                <span>Simulating Google SSO...</span>
-              </>
-            ) : (
-              <>
-                <svg className="h-4 w-4" viewBox="0 0 24 24">
-                  <path
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    fill="#4285F4"
-                  />
-                  <path
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    fill="#34A853"
-                  />
-                  <path
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    fill="#FBBC05"
-                  />
-                  <path
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    fill="#EA4335"
-                  />
-                </svg>
-                <span>Enroll with Google Workspace</span>
-              </>
-            )}
-          </button>
 
           {/* Footer Note */}
           <div className="mt-6 border-t border-slate-100 pt-4 text-center">

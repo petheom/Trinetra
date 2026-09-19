@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect, type FormEvent } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ShieldAlert,
   CircleCheck,
@@ -7,7 +7,6 @@ import {
   MapPin,
   FileSearch,
   ArrowUpRight,
-  IndianRupee,
   Layers,
   ChevronRight,
   Clock,
@@ -19,16 +18,30 @@ import {
   Search,
   Filter,
   CheckCircle2,
-  AlertTriangle,
   Globe2,
   RefreshCw,
+  PlusCircle,
+  Scale,
+  Store,
+  FileSpreadsheet,
+  Check,
+  X,
 } from 'lucide-react';
 import { useTriNetra, type UserRole, type InspectionReport } from '../context/TriNetraContext';
 import { INDIAN_STATES } from '../constants/indianStates';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { officer, reports, isLoadingReports, fetchReports } = useTriNetra();
+  const location = useLocation();
+  const { officer, reports, isLoadingReports, fetchReports, submitReport } = useTriNetra();
+
+  // Access Denied banner state from unauthorized redirection
+  const [accessDeniedNotice, setAccessDeniedNotice] = useState<string | null>(() => {
+    const state = location.state as { accessDenied?: boolean; message?: string } | null;
+    return state?.accessDenied
+      ? state.message || 'Access Denied: The requested operational resource is restricted to Field Officers.'
+      : null;
+  });
 
   // Safely resolve current role
   const activeRole: UserRole = (() => {
@@ -45,21 +58,63 @@ export default function Dashboard() {
 
   const isAdmin = activeRole === 'Admin';
 
-  // Read all inspection logs safely from localStorage with fallback to context
-  const allLogs: InspectionReport[] = useMemo(() => {
-    try {
-      const stored = localStorage.getItem('trinetra_reports');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to parse logs from localStorage:', e);
+  // Live reports directly from MongoDB
+  const allLogs: InspectionReport[] = reports;
+
+  // New Inspection Form state for Field Officer
+  const [shopName, setShopName] = useState('');
+  const [address, setAddress] = useState('');
+  const [equipmentChecked, setEquipmentChecked] = useState('');
+  const [status, setStatus] = useState<'Pass' | 'Fail'>('Pass');
+  const [remarks, setRemarks] = useState('');
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formSuccess, setFormSuccess] = useState('');
+
+  // Handle Form Submission to POST /api/reports
+  const handleCreateReport = async (e: FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    setFormSuccess('');
+
+    if (!shopName.trim()) {
+      setFormError('Please enter the Shop / Establishment Name.');
+      return;
     }
-    return reports;
-  }, [reports]);
+
+    if (!equipmentChecked.trim()) {
+      setFormError('Please specify the Equipment / Instrument Checked (e.g. Electronic Weighing Scale).');
+      return;
+    }
+
+    setIsSubmittingForm(true);
+
+    try {
+      await submitReport({
+        shopName: shopName.trim(),
+        address: address.trim(),
+        equipmentChecked: equipmentChecked.trim(),
+        status,
+        remarks: remarks.trim(),
+        region: officer?.region || 'Gujarat',
+      });
+
+      setFormSuccess(`Inspection report for "${shopName}" submitted and saved to MongoDB!`);
+      // Reset form fields
+      setShopName('');
+      setAddress('');
+      setEquipmentChecked('');
+      setStatus('Pass');
+      setRemarks('');
+      // Re-fetch to ensure sync
+      fetchReports();
+    } catch (err: any) {
+      console.error('Failed to submit report:', err);
+      setFormError(err?.message || 'Failed to submit report to database');
+    } finally {
+      setIsSubmittingForm(false);
+    }
+  };
 
   // Filter states for Admin View (Pan-India State Filter)
   const [selectedState, setSelectedState] = useState<string>('All');
@@ -78,21 +133,15 @@ export default function Dashboard() {
   // Filter states for Officer View
   const [officerCategoryFilter, setOfficerCategoryFilter] = useState<string>('All');
 
-  // Officer-specific reports: filter safely by officer's badgeId or officer's region
+  // Officer-specific reports: filter safely by officer's badgeId
   const officerLogs = useMemo(() => {
     if (!officer) return allLogs;
-    const officerRegionLower = String(officer.region || '').toLowerCase().trim();
     const officerBadge = String(officer.badgeId || '').toUpperCase().trim();
 
-    const matched = allLogs.filter((r) => {
+    return allLogs.filter((r) => {
       const reportOfficerId = String(r.officerId || '').toUpperCase().trim();
-      const reportRegionLower = String(r.region || '').toLowerCase().trim();
-      return (
-        (officerBadge && reportOfficerId === officerBadge) ||
-        (officerRegionLower && reportRegionLower === officerRegionLower)
-      );
+      return !officerBadge || reportOfficerId === officerBadge;
     });
-    return matched.length > 0 ? matched : allLogs;
   }, [allLogs, officer]);
 
   // Admin filtered data table: filter safely by Pan-India State / UT, verdict, and query
@@ -104,6 +153,7 @@ export default function Dashboard() {
       const logRegionLower = String(log.region || '').toLowerCase().trim();
       const logLocationLower = String(log.location || '').toLowerCase().trim();
       const logVerdict = String(log.verdict || '').trim();
+      const logStatus = String(log.status || '').trim();
 
       const matchState =
         selectedState === 'All' ||
@@ -111,10 +161,16 @@ export default function Dashboard() {
         logLocationLower.includes(selectedStateLower);
 
       const matchVerdict =
-        selectedVerdict === 'All' || logVerdict === selectedVerdict;
+        selectedVerdict === 'All' ||
+        logVerdict === selectedVerdict ||
+        (selectedVerdict === 'Pass' && (logStatus === 'Pass' || logVerdict === 'Compliant')) ||
+        (selectedVerdict === 'Fail' && (logStatus === 'Fail' || logVerdict === 'Non-Compliant'));
 
       const matchSearch =
         !q ||
+        String(log.shopName || '').toLowerCase().includes(q) ||
+        String(log.address || '').toLowerCase().includes(q) ||
+        String(log.equipmentChecked || '').toLowerCase().includes(q) ||
         String(log.productName || '').toLowerCase().includes(q) ||
         String(log.officerName || '').toLowerCase().includes(q) ||
         String(log.officerId || '').toLowerCase().includes(q) ||
@@ -126,13 +182,23 @@ export default function Dashboard() {
     });
   }, [allLogs, selectedState, selectedVerdict, searchQuery]);
 
-  // Metrics calculation
-  const currentLogs = isAdmin ? adminFilteredLogs : officerLogs;
-  const totalCount = currentLogs.length;
-  const compliantCount = currentLogs.filter((r) => r.verdict === 'Compliant').length;
-  const violationCount = currentLogs.filter((r) => r.verdict === 'Non-Compliant').length;
-  const manualReviewCount = currentLogs.filter((r) => r.verdict === 'Manual Review').length;
-  const passRate = totalCount > 0 ? ((compliantCount / totalCount) * 100).toFixed(1) : '100';
+  // Exact Summary Cards for Admin
+  const adminTotalReports = allLogs.length;
+  const adminTotalPassed = allLogs.filter(
+    (r) => r.status === 'Pass' || r.verdict === 'Compliant'
+  ).length;
+  const adminTotalFailed = allLogs.filter(
+    (r) => r.status === 'Fail' || r.verdict === 'Non-Compliant'
+  ).length;
+
+  // Officer metrics
+  const officerTotal = officerLogs.length;
+  const officerPassed = officerLogs.filter(
+    (r) => r.status === 'Pass' || r.verdict === 'Compliant'
+  ).length;
+  const officerFailed = officerLogs.filter(
+    (r) => r.status === 'Fail' || r.verdict === 'Non-Compliant'
+  ).length;
 
   // Extract unique active states present in the inspection ledger
   const activeStatesInLogs = useMemo(() => {
@@ -151,6 +217,29 @@ export default function Dashboard() {
 
   return (
     <div className="w-full space-y-8 pb-8">
+      {/* Access Denied Warning Banner */}
+      {accessDeniedNotice && (
+        <div className="flex items-center justify-between rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-xs font-bold text-amber-900 shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-amber-200 rounded-xl text-amber-800 shrink-0">
+              <ShieldAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-extrabold text-amber-950">Security Access Restriction</p>
+              <p className="font-medium text-amber-800 mt-0.5">{accessDeniedNotice}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAccessDeniedNotice(null)}
+            className="p-1.5 rounded-xl text-amber-700 hover:bg-amber-100 hover:text-amber-900 transition cursor-pointer"
+            aria-label="Dismiss alert"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* 1. TOP HEADER - ROLE SPECIFIC GREETING                                    */}
       {/* ========================================================================= */}
@@ -169,28 +258,31 @@ export default function Dashboard() {
             {isAdmin ? 'Pan-India Administrative Command Center' : 'Field Inspection & Compliance Workspace'}
           </h1>
 
-          <p className="mt-1 text-sm text-gray-500 flex flex-wrap items-center gap-2">
-            <span>Welcome,</span>
-            <strong className="text-gray-900 font-bold">
-              {officer?.name || (isAdmin ? 'Director Amit Trivedi' : 'Inspector Rajesh Varma')}
-            </strong>
+          <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3 text-sm text-slate-600">
+            <span className="font-medium text-slate-700">
+              Welcome, <strong className="font-bold text-slate-900 font-mono text-base">{officer?.badgeId || localStorage.getItem('badgeId') || (isAdmin ? 'ADMIN-HQ-01' : 'INSP-GJ-2041')}</strong>
+            </span>
+            <span className="text-slate-300">|</span>
             <span
-              className={`rounded px-2 py-0.5 text-xs font-mono font-bold ${
-                isAdmin ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border shadow-xs ${
+                isAdmin
+                  ? 'bg-rose-50 text-rose-700 border-rose-200 ring-1 ring-rose-400/20'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 ring-1 ring-emerald-400/20'
               }`}
             >
-              {officer?.badgeId || (isAdmin ? 'ADMIN-HQ-01' : 'INSP-GJ-2041')}
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  isAdmin ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'
+                }`}
+              />
+              Role: {activeRole}
             </span>
-            <span>• Role:</span>
-            <span className={`font-semibold ${isAdmin ? 'text-purple-700' : 'text-blue-700'}`}>
-              {activeRole}
+            <span className="text-slate-300">|</span>
+            <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
+              <strong className="text-slate-800">{officer?.name || (isAdmin ? 'Director Amit Trivedi' : 'Inspector Rajesh Varma')}</strong>
+              <span>({officer?.region || (isAdmin ? 'National HQ (Delhi)' : 'Gujarat')})</span>
             </span>
-            <span>• Jurisdiction:</span>
-            <span className="font-semibold text-gray-700 flex items-center gap-1">
-              <MapPin className="h-3.5 w-3.5 text-slate-400" />
-              {officer?.region || (isAdmin ? 'National HQ (Delhi)' : 'Gujarat')}
-            </span>
-          </p>
+          </div>
         </div>
 
         {/* Action Buttons: Live Database Sync, Field Officer "Start Inspection", Admin "Review Officer Logs" */}
@@ -240,89 +332,80 @@ export default function Dashboard() {
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. DYNAMIC METRIC CARDS                                                   */}
+      {/* 2. SUMMARY METRIC CARDS (REAL-TIME FROM MONGODB)                          */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Metric 1 */}
-        <div className="rounded-3xl border border-slate-200/90 bg-white/90 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+        {/* Card 1: Total Reports */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white/95 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              {isAdmin
-                ? selectedState === 'All'
-                  ? 'Pan-India Inspections'
-                  : `${selectedState} Inspections`
-                : 'My State Inspections'}
+              {isAdmin ? 'Total Reports (National)' : 'My Total Inspections'}
             </span>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
               <FileSearch className="h-5 w-5" />
             </div>
           </div>
-          <div className="mt-4">
-            <span className="text-3xl font-black text-slate-900">{totalCount}</span>
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              {isAdmin
-                ? selectedState === 'All'
-                  ? 'Across All 28 States & 8 UTs'
-                  : `Active in ${selectedState}`
-                : `Assigned in ${officer?.region || 'Gujarat'}`}
-            </p>
+          <div className="mt-4 flex items-baseline justify-between">
+            <span className="text-3xl sm:text-4xl font-black text-slate-900">
+              {isAdmin ? adminTotalReports : officerTotal}
+            </span>
+            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full">
+              Live in MongoDB
+            </span>
           </div>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            {isAdmin
+              ? 'Aggregated across all field enforcement officers'
+              : `Logged under badge ${officer?.badgeId || 'active profile'}`}
+          </p>
         </div>
 
-        {/* Metric 2 */}
-        <div className="rounded-3xl border border-slate-200/90 bg-white/90 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
+        {/* Card 2: Total Passed */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white/95 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Compliant Verified
+              Total Passed (Compliant)
             </span>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
               <CircleCheck className="h-5 w-5" />
             </div>
           </div>
-          <div className="mt-4">
-            <span className="text-3xl font-black text-emerald-600">{compliantCount}</span>
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              {passRate}% statutory compliance rate
-            </p>
+          <div className="mt-4 flex items-baseline justify-between">
+            <span className="text-3xl sm:text-4xl font-black text-emerald-600">
+              {isAdmin ? adminTotalPassed : officerPassed}
+            </span>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+              {((isAdmin ? adminTotalReports : officerTotal) > 0
+                ? (((isAdmin ? adminTotalPassed : officerPassed) / (isAdmin ? adminTotalReports : officerTotal)) * 100).toFixed(0)
+                : 100)}% Pass
+            </span>
           </div>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            Equipment passed Legal Metrology tolerance verification
+          </p>
         </div>
 
-        {/* Metric 3 */}
-        <div className="rounded-3xl border border-slate-200/90 bg-white/90 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
+        {/* Card 3: Total Failed */}
+        <div className="rounded-3xl border border-slate-200/90 bg-white/95 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Violations & Seizures
+              Total Failed (Non-Compliant)
             </span>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
               <ShieldAlert className="h-5 w-5" />
             </div>
           </div>
-          <div className="mt-4">
-            <span className="text-3xl font-black text-rose-600">{violationCount}</span>
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              Section 36 notices issued
-            </p>
-          </div>
-        </div>
-
-        {/* Metric 4 */}
-        <div className="rounded-3xl border border-slate-200/90 bg-white/90 backdrop-blur-md p-6 shadow-sm transition-all hover:shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              {isAdmin ? 'Total Penalties Levied' : 'Pending Manual Review'}
+          <div className="mt-4 flex items-baseline justify-between">
+            <span className="text-3xl sm:text-4xl font-black text-rose-600">
+              {isAdmin ? adminTotalFailed : officerFailed}
             </span>
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-50 text-purple-600">
-              {isAdmin ? <IndianRupee className="h-5 w-5" /> : <TriangleAlert className="h-5 w-5" />}
-            </div>
-          </div>
-          <div className="mt-4">
-            <span className="text-3xl font-black text-slate-900">
-              {isAdmin ? `₹${(violationCount * 25000).toLocaleString('en-IN')}` : manualReviewCount}
+            <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full">
+              Action Required
             </span>
-            <p className="mt-1 text-xs font-semibold text-slate-500">
-              {isAdmin ? 'Section 48 compounding ledger' : 'Secondary optical check'}
-            </p>
           </div>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            Notice under Section 36 / Stamping tolerances breached
+          </p>
         </div>
       </div>
 
@@ -499,13 +582,13 @@ export default function Dashboard() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-400 font-semibold uppercase tracking-wider">
-                    <th className="py-3 px-3">Officer Name</th>
-                    <th className="py-3 px-3">Badge ID</th>
-                    <th className="py-3 px-3">State / UT</th>
-                    <th className="py-3 px-3">Package / Commodity</th>
+                    <th className="py-3 px-3">Officer Name & Badge</th>
+                    <th className="py-3 px-3">Shop / Establishment</th>
+                    <th className="py-3 px-3">State / Location</th>
+                    <th className="py-3 px-3">Equipment Checked</th>
                     <th className="py-3 px-3">Date</th>
-                    <th className="py-3 px-3">Inspection Verdict</th>
-                    <th className="py-3 px-3 text-right">Dossier</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-right">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -517,95 +600,83 @@ export default function Dashboard() {
                           No inspection records found for {selectedState === 'All' ? 'selected filters' : selectedState}.
                         </span>
                         <span className="text-[11px] text-slate-400">
-                          Field officers operating in this State/UT have not logged packaging audits yet.
+                          Field officers operating in this jurisdiction have not logged inspections yet.
                         </span>
                       </td>
                     </tr>
                   ) : (
-                    adminFilteredLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
-                        {/* Officer Name */}
-                        <td className="py-3.5 px-3">
-                          <span className="font-bold text-slate-900 block">{log.officerName}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">#{log.id}</span>
-                        </td>
-
-                        {/* Badge ID */}
-                        <td className="py-3.5 px-3">
-                          <span className="rounded bg-blue-50 px-2 py-0.5 font-mono text-[11px] font-bold text-blue-700 ring-1 ring-blue-600/20">
-                            {log.officerId}
-                          </span>
-                        </td>
-
-                        {/* State / UT */}
-                        <td className="py-3.5 px-3">
-                          <div className="flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                            <span className="font-semibold text-slate-800">{log.region}</span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 block truncate max-w-[150px]" title={log.location}>
-                            {log.location}
-                          </span>
-                        </td>
-
-                        {/* Package / Commodity */}
-                        <td className="py-3.5 px-3 max-w-[200px]">
-                          <span className="font-semibold text-slate-900 block truncate" title={log.productName}>
-                            {log.productName}
-                          </span>
-                          <span className="text-[10px] text-slate-400 truncate block">{log.brand}</span>
-                        </td>
-
-                        {/* Date */}
-                        <td className="py-3.5 px-3 whitespace-nowrap">
-                          <span className="text-slate-600 flex items-center gap-1">
-                            <Clock className="h-3 w-3 text-slate-400" />
-                            {log.inspectionDate}
-                          </span>
-                        </td>
-
-                        {/* Verdict */}
-                        <td className="py-3.5 px-3">
-                          {log.verdict === 'Compliant' && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Compliant
+                    adminFilteredLogs.map((log) => {
+                      const isPass = log.status === 'Pass' || log.verdict === 'Compliant';
+                      return (
+                        <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                          {/* Officer Name & Badge */}
+                          <td className="py-3.5 px-3">
+                            <span className="font-bold text-slate-900 block">{log.officerName}</span>
+                            <span className="inline-block mt-0.5 rounded bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-700 ring-1 ring-blue-600/20">
+                              {log.officerId}
                             </span>
-                          )}
-                          {log.verdict === 'Non-Compliant' && (
-                            <div className="space-y-0.5">
+                          </td>
+
+                          {/* Shop / Establishment */}
+                          <td className="py-3.5 px-3 max-w-[200px]">
+                            <span className="font-bold text-slate-900 block truncate" title={log.shopName || log.productName}>
+                              {log.shopName || log.brand || log.productName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              #{log.docketId || log.id}
+                            </span>
+                          </td>
+
+                          {/* State / Location */}
+                          <td className="py-3.5 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <span className="font-semibold text-slate-800">{log.region}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 block truncate max-w-[150px]" title={log.address || log.location}>
+                              {log.address || log.location}
+                            </span>
+                          </td>
+
+                          {/* Equipment Checked */}
+                          <td className="py-3.5 px-3 max-w-[180px]">
+                            <span className="font-medium text-slate-800 block truncate" title={log.equipmentChecked || log.productName}>
+                              {log.equipmentChecked || log.productName}
+                            </span>
+                          </td>
+
+                          {/* Date */}
+                          <td className="py-3.5 px-3 whitespace-nowrap">
+                            <span className="text-slate-600 flex items-center gap-1 text-[11px]">
+                              <Clock className="h-3 w-3 text-slate-400 shrink-0" />
+                              {log.inspectionDate}
+                            </span>
+                          </td>
+
+                          {/* Status */}
+                          <td className="py-3.5 px-3">
+                            {isPass ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Pass
+                              </span>
+                            ) : (
                               <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20">
                                 <ShieldAlert className="h-3 w-3" />
-                                Non-Compliant
+                                Fail
                               </span>
-                              {log.violations?.[0] && (
-                                <span className="block text-[10px] text-rose-600 font-medium truncate max-w-[180px]">
-                                  {log.violations[0]}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {log.verdict === 'Manual Review' && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-600/20">
-                              <AlertTriangle className="h-3 w-3" />
-                              Manual Review
-                            </span>
-                          )}
-                        </td>
+                            )}
+                          </td>
 
-                        {/* Action */}
-                        <td className="py-3.5 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => navigate('/reports')}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-xs transition hover:bg-slate-50 hover:text-blue-600"
-                          >
-                            <span>Dossier</span>
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                          {/* Remarks */}
+                          <td className="py-3.5 px-3 text-right max-w-[180px]">
+                            <span className="text-[11px] text-slate-500 truncate block text-right" title={log.remarks || log.findings || 'Verified'}>
+                              {log.remarks || log.findings || (isPass ? 'Compliant' : 'Non-Compliant')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -625,12 +696,187 @@ export default function Dashboard() {
         /* FIELD OFFICER ACTION-FOCUSED VIEW                                         */
         /* ========================================================================= */
         <div className="space-y-8 animate-in fade-in duration-300">
-          {/* Action Quick Launchers Bar */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Card 1: Launch Inspection */}
+          {/* 1. New Inspection Report Form */}
+          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-5">
+              <div>
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-700 mb-2">
+                  <Scale className="h-3.5 w-3.5" />
+                  <span>On-Site Statutory Verification</span>
+                </div>
+                <h2 className="text-xl font-bold tracking-tight text-slate-900">
+                  New Field Inspection Report
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Submit weights & measures inspection data directly to MongoDB with statutory status
+                </p>
+              </div>
+
+              <div className="text-right">
+                <span className="text-[11px] font-mono text-slate-400 block">
+                  Jurisdiction: <strong className="text-slate-700">{officer?.region || 'Gujarat'} Circle</strong>
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Officer ID: <strong className="text-slate-700">{officer?.badgeId || 'INSP-GJ-2041'}</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Form Success Banner */}
+            {formSuccess && (
+              <div className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3.5 text-xs text-emerald-800 animate-in fade-in">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span className="font-semibold">{formSuccess}</span>
+              </div>
+            )}
+
+            {/* Form Error Banner */}
+            {formError && (
+              <div className="mt-4 flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-800 animate-in fade-in">
+                <TriangleAlert className="h-4 w-4 shrink-0 text-rose-600" />
+                <span className="font-semibold">{formError}</span>
+              </div>
+            )}
+
+            {/* The Real Submission Form */}
+            <form onSubmit={handleCreateReport} className="mt-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Shop Name */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    Shop / Establishment Name <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                      <Store className="h-4 w-4" />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={shopName}
+                      onChange={(e) => {
+                        setShopName(e.target.value);
+                        if (formError) setFormError('');
+                      }}
+                      placeholder="e.g., Apex Provision Store, C.G. Road"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-3.5 text-xs font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Equipment Checked */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    Equipment Checked <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                      <Scale className="h-4 w-4" />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={equipmentChecked}
+                      onChange={(e) => {
+                        setEquipmentChecked(e.target.value);
+                        if (formError) setFormError('');
+                      }}
+                      placeholder="e.g., Electronic Weighing Scale (Model ES-200)"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-3.5 text-xs font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 transition"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Address */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    Shop Address / Location
+                  </label>
+                  <div className="relative">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                      <MapPin className="h-4 w-4" />
+                    </div>
+                    <input
+                      type="text"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="e.g., Shop #14, Ground Floor, Sector 17, Market Square"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-3.5 text-xs font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Status Selection (Pass / Fail) */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                    Inspection Status <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStatus('Pass')}
+                      className={`flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
+                        status === 'Pass'
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20 ring-2 ring-emerald-500'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <Check className="h-4 w-4" />
+                      <span>Pass</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setStatus('Fail')}
+                      className={`flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-xs font-bold transition-all cursor-pointer ${
+                        status === 'Fail'
+                          ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20 ring-2 ring-rose-500'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <X className="h-4 w-4" />
+                      <span>Fail</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Inspection Remarks / Observations
+                </label>
+                <textarea
+                  rows={2}
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder="e.g., Stamping seal intact. Calibration verified with standard 5kg class F weight. Tolerances within permissible limits."
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-2.5 px-3.5 text-xs font-semibold text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 transition"
+                />
+              </div>
+
+              {/* Submit Button */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={isSubmittingForm}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-500/25 transition-all hover:bg-emerald-700 hover:shadow-xl active:scale-95 disabled:opacity-60 cursor-pointer"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  <span>{isSubmittingForm ? 'Submitting to MongoDB...' : 'Save & Submit Inspection Report'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* 2. Quick Launchers & Navigation Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Card 1: Launch Camera OCR */}
             <div
               onClick={() => navigate('/scanner')}
-              className="group cursor-pointer rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-600 to-indigo-700 p-6 text-white shadow-xl shadow-blue-500/20 transition-all duration-300 hover:scale-[1.02]"
+              className="group cursor-pointer rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-600 to-indigo-700 p-6 text-white shadow-xl shadow-blue-500/20 transition-all duration-300 hover:scale-[1.01]"
             >
               <div className="flex items-center justify-between">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-md">
@@ -638,68 +884,48 @@ export default function Dashboard() {
                 </div>
                 <ArrowUpRight className="h-5 w-5 text-blue-200 transition-transform group-hover:translate-x-1 group-hover:-translate-y-1" />
               </div>
-              <h3 className="mt-5 text-lg font-black tracking-tight">Start New Package Inspection</h3>
+              <h3 className="mt-5 text-lg font-black tracking-tight">Camera OCR Packaging Inspection</h3>
               <p className="mt-1 text-xs text-blue-100">
-                Run automated OCR scanning against Legal Metrology Rules, verify mandatory MRP, Net Volume & FSSAI declarations.
+                Audit pre-packaged commodities with AI OCR scanner checking MRP, Net Volume & FSSAI declarations under 2011 Rules.
               </p>
               <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-white underline">
-                <span>Launch Camera / OCR</span>
+                <span>Open Optical Scanner</span>
                 <ChevronRight className="h-3.5 w-3.5" />
               </div>
             </div>
 
-            {/* Card 2: Generate Compliance PDFs */}
+            {/* Card 2: Legal Dossier Generator */}
             <div
               onClick={() => navigate('/reports')}
-              className="group cursor-pointer rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:scale-[1.02] hover:border-blue-300"
+              className="group cursor-pointer rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:scale-[1.01] hover:border-blue-300"
             >
               <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                  <FileText className="h-6 w-6" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-50 text-purple-600">
+                  <FileSpreadsheet className="h-6 w-6" />
                 </div>
                 <ChevronRight className="h-5 w-5 text-slate-400 group-hover:text-slate-600" />
               </div>
-              <h3 className="mt-5 text-lg font-black text-slate-900 tracking-tight">Generate Compliance PDFs</h3>
+              <h3 className="mt-5 text-lg font-black text-slate-900 tracking-tight">Statutory Legal Dossiers & Export</h3>
               <p className="mt-1 text-xs text-slate-500">
-                Compile statutory violation notices under Section 36 and export court-admissible audit dossiers with timestamps.
+                Review compiled violation records under Section 36 and export court-admissible audit reports with digital timestamps.
               </p>
               <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-blue-600">
-                <span>Open Reports & PDF Generator</span>
+                <span>View Full Archive & Dossiers</span>
                 <ChevronRight className="h-3.5 w-3.5" />
-              </div>
-            </div>
-
-            {/* Card 3: Jurisdictional Status */}
-            <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-50 text-purple-600">
-                  <MapPin className="h-6 w-6" />
-                </div>
-                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                  Shift Active
-                </span>
-              </div>
-              <h3 className="mt-5 text-lg font-black text-slate-900 tracking-tight">
-                {officer?.region || 'Gujarat'} Regulatory Jurisdiction
-              </h3>
-              <p className="mt-1 text-xs text-slate-500">
-                Assigned Officer: <strong className="text-slate-800">{officer?.name || 'Inspector Rajesh Varma'}</strong> ({officer?.badgeId || 'INSP-GJ-2041'}). Local logs automatically cached to client storage.
-              </p>
-              <div className="mt-4 text-[11px] font-mono text-slate-500">
-                National Enforcement Portal: Connected
               </div>
             </div>
           </div>
 
-          {/* Officer's Local Inspection History Table */}
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          {/* 3. Officer's Personal Inspection History Data Table */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-5">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  My State Inspection History ({officer?.region || 'Gujarat'})
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-emerald-600" />
+                  <span>My Inspection Ledger (Badge #{officer?.badgeId || 'INSP-GJ-2041'})</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Inspections recorded by your badge in the current regulatory cycle
+                  Verified inspection records filed by your officer badge in MongoDB
                 </p>
               </div>
 
@@ -713,6 +939,7 @@ export default function Dashboard() {
                   <option value="All">All Categories</option>
                   <option value="Food & Beverages">Food & Beverages</option>
                   <option value="Personal Care & Cosmetics">Personal Care & Cosmetics</option>
+                  <option value="Commercial Weights & Measures">Commercial Weights & Measures</option>
                   <option value="Household Commodities">Household Commodities</option>
                 </select>
               </div>
@@ -722,79 +949,97 @@ export default function Dashboard() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-400 font-semibold uppercase tracking-wider">
-                    <th className="py-3 px-3">Product Name</th>
-                    <th className="py-3 px-3">Category</th>
-                    <th className="py-3 px-3">Location</th>
+                    <th className="py-3 px-3">Shop / Establishment</th>
+                    <th className="py-3 px-3">Address</th>
+                    <th className="py-3 px-3">Equipment Checked</th>
                     <th className="py-3 px-3">Date</th>
-                    <th className="py-3 px-3">Verdict</th>
-                    <th className="py-3 px-3 text-right">Action</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-right">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {officerFilteredCategoryLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-3.5 px-3">
-                        <span className="font-bold text-slate-900 block">{log.productName}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">#{log.id}</span>
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                          {log.category}
+                  {officerFilteredCategoryLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <Scale className="h-8 w-8 mx-auto mb-2 text-slate-300" />
+                        <span className="block font-semibold text-slate-600">
+                          No inspection reports submitted yet under your badge.
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          Fill out the form above to record your first on-site inspection.
                         </span>
                       </td>
-                      <td className="py-3.5 px-3 max-w-[200px] truncate">
-                        <div className="flex items-center gap-1 text-slate-600 truncate">
-                          <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <span className="truncate">{log.location}</span>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3 whitespace-nowrap text-slate-600">
-                        {log.inspectionDate}
-                      </td>
-                      <td className="py-3.5 px-3">
-                        {log.verdict === 'Compliant' && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
-                            <CheckCircle2 className="h-3 w-3" />
-                            Compliant
-                          </span>
-                        )}
-                        {log.verdict === 'Non-Compliant' && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-600/20">
-                            <ShieldAlert className="h-3 w-3" />
-                            Non-Compliant
-                          </span>
-                        )}
-                        {log.verdict === 'Manual Review' && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-600/20">
-                            <AlertTriangle className="h-3 w-3" />
-                            Manual Review
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => navigate('/reports')}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 hover:text-blue-600"
-                        >
-                          <span>PDF</span>
-                          <Download className="h-3 w-3" />
-                        </button>
-                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    officerFilteredCategoryLogs.map((log) => {
+                      const isPass = log.status === 'Pass' || log.verdict === 'Compliant';
+                      return (
+                        <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
+                          {/* Shop Name */}
+                          <td className="py-3.5 px-3 max-w-[200px]">
+                            <span className="font-bold text-slate-900 block truncate" title={log.shopName || log.productName}>
+                              {log.shopName || log.brand || log.productName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">#{log.docketId || log.id}</span>
+                          </td>
+
+                          {/* Address */}
+                          <td className="py-3.5 px-3 max-w-[220px]">
+                            <div className="flex items-center gap-1 text-slate-600 truncate" title={log.address || log.location}>
+                              <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              <span className="truncate">{log.address || log.location}</span>
+                            </div>
+                          </td>
+
+                          {/* Equipment Checked */}
+                          <td className="py-3.5 px-3 max-w-[180px]">
+                            <span className="font-medium text-slate-800 block truncate" title={log.equipmentChecked || log.productName}>
+                              {log.equipmentChecked || log.productName}
+                            </span>
+                          </td>
+
+                          {/* Date */}
+                          <td className="py-3.5 px-3 whitespace-nowrap text-slate-600 text-[11px]">
+                            {log.inspectionDate}
+                          </td>
+
+                          {/* Status */}
+                          <td className="py-3.5 px-3">
+                            {isPass ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Pass
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-600/20">
+                                <ShieldAlert className="h-3 w-3" />
+                                Fail
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Remarks */}
+                          <td className="py-3.5 px-3 text-right max-w-[200px]">
+                            <span className="text-[11px] text-slate-500 truncate block text-right" title={log.remarks || log.findings || 'Compliant'}>
+                              {log.remarks || log.findings || (isPass ? 'Compliant' : 'Non-Compliant')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
 
             <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-xs text-slate-500">
-              <span>Showing {officerFilteredCategoryLogs.length} reports filed by your badge.</span>
+              <span>Showing {officerLogs.length} verified inspection reports recorded by your badge in MongoDB.</span>
               <button
                 type="button"
-                onClick={() => navigate('/reports')}
-                className="font-semibold text-blue-600 hover:underline"
+                onClick={() => fetchReports()}
+                className="font-semibold text-emerald-700 hover:underline"
               >
-                View full historical archive
+                Refresh live ledger
               </button>
             </div>
           </div>

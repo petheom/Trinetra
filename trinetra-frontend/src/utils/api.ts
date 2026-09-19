@@ -75,6 +75,7 @@ api.interceptors.response.use(
       status,
       message,
       data: error.response?.data,
+      response: error.response,
       isAxiosError: true,
     });
   }
@@ -121,14 +122,19 @@ export const mapBackendReportToFrontend = (r: any): InspectionReport => {
     id: rawId,
     _id: r._id,
     docketId: r.docketId || rawId,
-    productName: r.productName || 'Inspected Packaged Commodity',
-    brand: r.brand || 'Domestic Manufacturer',
+    shopName: r.shopName || '',
+    address: r.address || '',
+    equipmentChecked: r.equipmentChecked || '',
+    status: r.status || (r.verdict === 'Compliant' ? 'Pass' : 'Fail'),
+    remarks: r.remarks || r.findings || '',
+    productName: r.productName || (r.shopName ? `${r.equipmentChecked || 'Equipment'} @ ${r.shopName}` : 'Inspected Packaged Commodity'),
+    brand: r.brand || r.shopName || 'Domestic Manufacturer',
     category: r.category || 'Food & Beverages',
     inspectionDate: dateStr,
     officerName: r.officerName || 'Inspector Rajesh Varma',
     officerId: r.officerId || 'INSP-GJ-2041',
     region: r.region || 'Gujarat',
-    location: r.location || `${r.region || 'State'} Circle, Field Unit`,
+    location: r.address || r.location || `${r.region || 'State'} Circle, Field Unit`,
     verdict:
       r.verdict === 'Compliant'
         ? 'Compliant'
@@ -140,6 +146,7 @@ export const mapBackendReportToFrontend = (r: any): InspectionReport => {
     reasonsForFailure: Array.isArray(r.reasonsForFailure) ? r.reasonsForFailure : [],
     findings:
       r.findings ||
+      r.remarks ||
       (r.extractedText
         ? `OCR statutory audit conducted on packaging declarations under Rules, 2011.`
         : ''),
@@ -160,6 +167,7 @@ export const authAPI = {
   register: async (payload: {
     name: string;
     badgeId: string;
+    username?: string;
     password: string;
     role?: 'Admin' | 'Field Officer';
     region?: string;
@@ -169,12 +177,13 @@ export const authAPI = {
   },
 
   /**
-   * Log in with Badge ID / Username and Password
+   * Log in with Badge ID / Username, Password, and Role
    */
   login: async (credentials: {
     badgeId?: string;
     username?: string;
     password: string;
+    role?: 'Admin' | 'Field Officer';
   }) => {
     const response = await api.post('/api/auth/login', credentials);
     return response.data;
@@ -193,6 +202,94 @@ export const authAPI = {
    */
   checkAdmin: async () => {
     const response = await api.get('/api/auth/admin-check');
+    return response.data;
+  },
+};
+
+// -------------------------------------------------------------
+// Dedicated Inspection Report Endpoints (/api/reports)
+// -------------------------------------------------------------
+export interface CreateReportPayload {
+  shopName: string;
+  address?: string;
+  equipmentChecked: string;
+  status: 'Pass' | 'Fail';
+  remarks?: string;
+  productName?: string;
+  brand?: string;
+  category?: string;
+  region?: string;
+  location?: string;
+}
+
+export const reportAPI = {
+  /**
+   * Submit a new field inspection report directly to MongoDB
+   */
+  createReport: async (payload: CreateReportPayload) => {
+    const response = await api.post('/api/reports', payload);
+    return response.data;
+  },
+
+  /**
+   * Fetch inspection reports (all for Admin, or only officer's own for Field Officer)
+   */
+  getReports: async (params?: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    page?: number;
+  }) => {
+    const response = await api.get('/api/reports', { params });
+    return response.data;
+  },
+};
+
+// -------------------------------------------------------------
+// Dedicated Server-Side OCR Scanner Endpoints (/api/scanner)
+// -------------------------------------------------------------
+export interface ScannerEvaluationField {
+  id: string;
+  name: string;
+  rule: string;
+  found: boolean;
+  snippet: string | null;
+  explanation: string;
+}
+
+export interface ScannerApiResponse {
+  success: boolean;
+  message: string;
+  extractedText: string;
+  ocrConfidence: string;
+  evaluation: {
+    isCompliant: boolean;
+    verdict: 'Compliant' | 'Non-Compliant';
+    confidenceScore: string;
+    summary: string;
+    foundFields: string[];
+    missingFields: string[];
+    fields: ScannerEvaluationField[];
+  };
+}
+
+export const scannerAPI = {
+  /**
+   * Analyze uploaded image file or base64 using server-side Tesseract.js & 2011 Rules Engine
+   */
+  analyzeImage: async (imageFileOrBase64: File | string): Promise<ScannerApiResponse> => {
+    if (typeof imageFileOrBase64 === 'string') {
+      const response = await api.post('/api/scanner/analyze', { image: imageFileOrBase64 });
+      return response.data;
+    }
+
+    const formData = new FormData();
+    formData.append('image', imageFileOrBase64);
+    const response = await api.post('/api/scanner/analyze', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   },
 };

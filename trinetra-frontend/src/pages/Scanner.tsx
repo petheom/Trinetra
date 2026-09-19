@@ -28,6 +28,7 @@ import {
 import { useTriNetra } from '../context/TriNetraContext';
 import { analyzePackagingText, type InspectionOcrAnalysis } from '../utils/legalMetrologyOcr';
 import { generateInspectionPdf } from '../utils/generatePdfReport';
+import { scannerAPI } from '../utils/api';
 
 const CATEGORIES = [
   'Food & Beverages',
@@ -61,6 +62,7 @@ export default function Scanner() {
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatusText, setScanStatusText] = useState('');
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [blurryErrorModal, setBlurryErrorModal] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<InspectionOcrAnalysis | null>(null);
   const [hasCopiedRawText, setHasCopiedRawText] = useState(false);
   const [savedReportId, setSavedReportId] = useState<string | null>(null);
@@ -87,6 +89,48 @@ export default function Scanner() {
       }
     };
   }, [selectedImage]);
+
+  // RBAC Guard: If Admin manually enters /scanner, redirect to Dashboard with Access Denied message
+  useEffect(() => {
+    const activeRole =
+      officer?.role ||
+      (() => {
+        try {
+          const s = localStorage.getItem('activeSession');
+          if (s) return JSON.parse(s)?.role;
+        } catch {}
+        return null;
+      })();
+
+    if (activeRole === 'Admin') {
+      showToast('Access Denied: The OCR Scanner is restricted to Field Officers.', 'error');
+      navigate('/dashboard', {
+        replace: true,
+        state: {
+          accessDenied: true,
+          message: 'Access Denied: The OCR Packaging Scanner & Inspection workflows are restricted to Field Officers.',
+        },
+      });
+    }
+  }, [officer, navigate, showToast]);
+
+  const handleRetakePhoto = () => {
+    setBlurryErrorModal(null);
+    setOcrError(null);
+    setAnalysisResult(null);
+    setIntakeTab('camera');
+    startLiveCamera('environment');
+  };
+
+  const handleUploadNewPhoto = () => {
+    setBlurryErrorModal(null);
+    setOcrError(null);
+    setAnalysisResult(null);
+    setIntakeTab('upload');
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 50);
+  };
 
   // -------------------------------------------------------------
   // Live Camera Controls (navigator.mediaDevices.getUserMedia)
@@ -288,6 +332,7 @@ export default function Scanner() {
     setFileDetails(null);
     setAnalysisResult(null);
     setOcrError(null);
+    setBlurryErrorModal(null);
     setIsScanning(false);
     setScanProgress(0);
     setSavedReportId(null);
@@ -305,37 +350,69 @@ export default function Scanner() {
     }
 
     setIsScanning(true);
-    setScanProgress(5);
-    setScanStatusText('Initializing Tesseract OCR neural engine...');
+    setScanProgress(15);
+    setScanStatusText('Uploading packaging artwork to TriNetra Server-Side OCR Pipeline...');
     setOcrError(null);
+    setBlurryErrorModal(null);
     setAnalysisResult(null);
 
     try {
       const imageSource = selectedFile || selectedImage;
+      let rawExtractedText = '';
+      let confidence = 95;
 
-      let result: { data: { text?: string; confidence?: number } };
-      if (typeof window !== 'undefined' && (window as unknown as { mockTesseractOcrText?: string }).mockTesseractOcrText) {
-        setScanProgress(100);
-        result = {
-          data: {
-            text: (window as unknown as { mockTesseractOcrText: string }).mockTesseractOcrText,
-            confidence: 98,
-          },
-        };
-      } else {
-        result = await Tesseract.recognize(imageSource!, 'eng', {
+      // 1. Primary: Server-Side Tesseract.js & 2011 Rules Engine (/api/scanner/analyze)
+      try {
+        setScanProgress(35);
+        setScanStatusText('Server OCR Engine: Enhancing image with Sharp & running Tesseract.js...');
+
+        const backendResponse = await scannerAPI.analyzeImage(imageSource!);
+        if (backendResponse && backendResponse.success && backendResponse.extractedText) {
+          rawExtractedText = backendResponse.extractedText;
+          const confNum = parseInt(backendResponse.ocrConfidence, 10);
+          confidence = isNaN(confNum) ? 95 : confNum;
+          setScanProgress(85);
+          setScanStatusText('Parsing mandatory declarations against Legal Metrology Rules, 2011...');
+        } else {
+          throw new Error(backendResponse?.message || 'Server returned empty OCR text');
+        }
+      } catch (serverErr: any) {
+        // Intercept 400 Bad Request if the backend rejected a blurry / unreadable image
+        const status = serverErr?.response?.status;
+        const errorData = serverErr?.response?.data;
+        const blurErrorMsg =
+          errorData?.error ||
+          errorData?.message ||
+          (status === 400
+            ? 'Image is blurry or unreadable. Please ensure good lighting, no reflections, and try again.'
+            : null);
+
+        if (status === 400 && blurErrorMsg) {
+          // STOP the scanning process immediately: DO NOT generate report, DO NOT show report
+          setOcrError(blurErrorMsg);
+          setBlurryErrorModal(blurErrorMsg);
+          setIsScanning(false);
+          setScanProgress(0);
+          setAnalysisResult(null);
+          return;
+        }
+
+        console.warn('[Server-Side OCR] Connection error, utilizing browser-side Tesseract engine:', serverErr);
+        setScanStatusText('Falling back to browser-accelerated Tesseract OCR...');
+
+        const result = await Tesseract.recognize(imageSource!, 'eng', {
           logger: (m) => {
             if (!isMountedRef.current) return;
             if (m && typeof m.progress === 'number') {
               const pct = Math.min(Math.round(m.progress * 100), 98);
               setScanProgress(pct);
 
-              const status = String(m.status || '').toLowerCase();
-              if (status.includes('loading')) {
+              const statusStr = String(m.status || '').toLowerCase();
+              if (statusStr.includes('loading')) {
                 setScanStatusText(`Loading language weights... (${pct}%)`);
-              } else if (status.includes('init')) {
+              } else if (statusStr.includes('init')) {
                 setScanStatusText(`Initializing OCR pipeline... (${pct}%)`);
-              } else if (status.includes('recogniz')) {
+              } else if (statusStr.includes('recogniz')) {
                 setScanStatusText(`Recognizing packaging typography & declarations... (${pct}%)`);
               } else {
                 setScanStatusText(`Processing artwork frame... (${pct}%)`);
@@ -343,19 +420,25 @@ export default function Scanner() {
             }
           },
         });
+
+        rawExtractedText = result.data.text || '';
+        confidence = result.data.confidence || 0;
       }
 
       if (!isMountedRef.current) return;
 
-      const rawExtractedText = result.data.text || '';
-      const confidence = result.data.confidence || 0;
+      const trimmedText = rawExtractedText.trim();
+      const alphanumericChars = trimmedText.replace(/[^a-zA-Z0-9]/g, '');
+      const alphanumericRatio = trimmedText.length > 0 ? alphanumericChars.length / trimmedText.length : 0;
 
-      if (!rawExtractedText.trim()) {
-        setOcrError(
-          'No readable text could be recognized from this image. Please ensure direct lighting, sharp focus, and high contrast on the packaging declarations.'
-        );
+      // Reject blurry, unreadable, or gibberish images immediately
+      if (confidence < 45 || alphanumericChars.length < 8 || (trimmedText.length >= 10 && alphanumericRatio < 0.35)) {
+        const blurMsg = 'Image is blurry or unreadable. Please ensure good lighting, no reflections, and try again.';
+        setOcrError(blurMsg);
+        setBlurryErrorModal(blurMsg);
         setIsScanning(false);
-        setScanProgress(100);
+        setScanProgress(0);
+        setAnalysisResult(null);
         return;
       }
 
@@ -938,29 +1021,40 @@ export default function Scanner() {
 
               {/* State B: OCR Engine Error */}
               {ocrError && (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-5 space-y-3">
+                <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/90 p-5 space-y-3 shadow-xs">
                   <div className="flex items-start gap-3">
-                    <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="p-2 rounded-xl bg-rose-100 text-rose-600 shrink-0 mt-0.5">
+                      <AlertCircle className="h-5 w-5" />
+                    </div>
                     <div>
-                      <h4 className="text-sm font-bold text-rose-900">Optical Analysis Failure</h4>
-                      <p className="mt-1 text-xs text-rose-700 leading-relaxed">{ocrError}</p>
+                      <h4 className="text-sm font-extrabold text-rose-900">Packaging Scan Unreadable</h4>
+                      <p className="mt-1 text-xs text-rose-800 leading-relaxed font-medium">{ocrError}</p>
                     </div>
                   </div>
-                  <div className="pt-2 flex items-center gap-2">
+                  <div className="pt-2 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleRunOcrScan}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 transition cursor-pointer"
+                      onClick={handleRetakePhoto}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 transition cursor-pointer active:scale-95"
                     >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      <span>Retry OCR Recognition</span>
+                      <Camera className="h-3.5 w-3.5" />
+                      <span>Try Again / Retake Photo</span>
                     </button>
                     <button
                       type="button"
-                      onClick={handleReset}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                      onClick={handleUploadNewPhoto}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer active:scale-95"
                     >
+                      <UploadCloud className="h-3.5 w-3.5" />
                       <span>Upload Clearer Image</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRunOcrScan}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      <span>Retry Scan</span>
                     </button>
                   </div>
                 </div>
@@ -1341,6 +1435,61 @@ export default function Scanner() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Blurry / Unreadable Image Error Modal */}
+      {blurryErrorModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-rose-100 animate-in zoom-in-95 duration-200 text-center">
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => setBlurryErrorModal(null)}
+              className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              aria-label="Close dialog"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Warning Icon Badge */}
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 shadow-inner mb-4">
+              <Camera className="h-8 w-8" />
+            </div>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-700 uppercase tracking-wider mb-2">
+              <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
+              <span>Image Quality Check Failed</span>
+            </div>
+
+            <h3 className="text-lg font-black text-slate-900 mb-2">
+              Packaging Image Unreadable
+            </h3>
+
+            <p className="text-xs text-slate-600 leading-relaxed px-2 mb-6">
+              {blurryErrorModal}
+            </p>
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={handleRetakePhoto}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition cursor-pointer active:scale-95"
+              >
+                <Camera className="h-4 w-4" />
+                <span>Try Again / Retake Photo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleUploadNewPhoto}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold py-2.5 px-4 text-xs uppercase tracking-wider transition cursor-pointer active:scale-95"
+              >
+                <UploadCloud className="h-4 w-4 text-slate-500" />
+                <span>Upload Different Image</span>
+              </button>
             </div>
           </div>
         </div>

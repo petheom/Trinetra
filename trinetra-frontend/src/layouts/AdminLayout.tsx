@@ -64,9 +64,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   };
 
   const pageInfo = getPageInfo();
-  const badgeId = officer?.badgeId || 'INSP-GJ-2041';
+  const badgeId = officer?.badgeId || localStorage.getItem('badgeId') || 'INSP-GJ-2041';
   const officerName = officer?.name || 'Inspector Rajesh Varma';
-  const officerRole = officer?.role || 'Field Officer';
+  const officerRole = (officer?.role || localStorage.getItem('role') || localStorage.getItem('userRole') || 'Field Officer') as 'Admin' | 'Field Officer';
   const officerRegion = officer?.region || 'Gujarat';
 
   return (
@@ -138,32 +138,51 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
               <span>National Metrology Grid • Active</span>
             </div>
 
-            {/* Quick Action Pill */}
-            <Link
-              to="/scanner"
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/90 px-3 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition shadow-xs cursor-pointer"
-            >
-              <Sparkles className="h-3 w-3 text-blue-600" />
-              <span>OCR Scanner</span>
-            </Link>
+            {/* Quick Action Pill - Field Officer Only */}
+            {officerRole !== 'Admin' && (
+              <Link
+                to="/scanner"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/90 px-3 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition shadow-xs cursor-pointer"
+              >
+                <Sparkles className="h-3 w-3 text-blue-600" />
+                <span>OCR Scanner</span>
+              </Link>
+            )}
 
-            {/* Officer Profile Badge Pill */}
-            <div className="flex items-center gap-2 rounded-full border border-slate-200/90 bg-white py-1 pl-1.5 pr-3 shadow-xs">
+            {/* Officer Profile & Role Badge Pill */}
+            <div className="flex items-center gap-2 sm:gap-3 rounded-2xl border border-slate-200/90 bg-white/95 py-1.5 pl-2 pr-3 sm:pr-3.5 shadow-xs">
               <div
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-white font-bold text-[10px] shadow-xs ${
+                className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-white font-bold text-xs shadow-xs ${
                   officerRole === 'Admin'
-                    ? 'bg-gradient-to-tr from-purple-600 to-indigo-600'
-                    : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
+                    ? 'bg-gradient-to-tr from-rose-600 to-red-600 ring-2 ring-rose-100'
+                    : 'bg-gradient-to-tr from-emerald-600 to-teal-600 ring-2 ring-emerald-100'
                 }`}
               >
-                <Shield className="h-3.5 w-3.5" />
+                <Shield className="h-4 w-4" />
               </div>
               <div className="flex flex-col text-left leading-tight">
-                <span className="font-bold text-slate-900 text-xs truncate max-w-[90px] sm:max-w-[130px]">
-                  {officerName}
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {badgeId} • {officerRegion}
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-bold text-slate-900 text-xs truncate max-w-[100px] sm:max-w-[150px]">
+                    Welcome, <span className="font-mono text-blue-700">{badgeId}</span>
+                  </span>
+                  <span className="text-slate-300 font-normal">|</span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-2xs ${
+                      officerRole === 'Admin'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200 ring-1 ring-rose-400/20'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 ring-1 ring-emerald-400/20'
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        officerRole === 'Admin' ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'
+                      }`}
+                    />
+                    Role: {officerRole}
+                  </span>
+                </div>
+                <span className="text-[10px] font-medium text-slate-400 truncate max-w-[160px] sm:max-w-[200px]">
+                  {officerName} • {officerRegion}
                 </span>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   FileText,
@@ -21,12 +21,25 @@ import { generateSavedReportPdf } from '../utils/generatePdfReport';
 
 export default function Reports() {
   const location = useLocation();
-  const { reports, isLoadingReports, fetchReports } = useTriNetra();
+  const { officer, reports, isLoadingReports, fetchReports } = useTriNetra();
 
   // Automatically fetch latest live reports from backend on page view
   useEffect(() => {
     fetchReports();
   }, [fetchReports]);
+
+  const isAdmin = officer?.role === 'Admin';
+
+  // Strict RBAC: Field Officers ONLY see their own inspection dossiers; Admins see national master ledger
+  const accessibleReports = useMemo(() => {
+    if (isAdmin) return reports;
+    if (!officer?.badgeId) return reports;
+    const officerBadge = String(officer.badgeId).toUpperCase().trim();
+    return reports.filter((r) => {
+      const repOfficerId = String(r.officerId || '').toUpperCase().trim();
+      return !repOfficerId || repOfficerId === officerBadge;
+    });
+  }, [reports, isAdmin, officer]);
 
   // Highlight newest report if navigated here from verification
   const newReportId = (location.state as { newReportId?: string } | null)?.newReportId;
@@ -39,8 +52,8 @@ export default function Reports() {
   );
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  // Search and filter logic over dynamic reports
-  const filteredReports = reports.filter((report) => {
+  // Search and filter logic over accessible reports
+  const filteredReports = accessibleReports.filter((report) => {
     const q = String(searchQuery || '').toLowerCase().trim();
     const matchesSearch =
       !q ||

@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { connectDB } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import inspectionRoutes from './routes/inspectionRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
+import scannerRoutes from './routes/scannerRoutes.js';
 import debugRoutes from './routes/debugRoutes.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
@@ -18,9 +20,10 @@ if (process.env.NODE_ENV !== 'test') {
 const app = express();
 
 // Security & Parsing Middleware
+const clientOrigin = process.env.CLIENT_URL;
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || '*',
+    origin: clientOrigin && clientOrigin !== '*' ? clientOrigin : true,
     credentials: true,
   })
 );
@@ -55,6 +58,8 @@ app.get('/api/health', (req, res) => {
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/inspections', inspectionRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/scanner', scannerRoutes);
 app.use('/api/debug', debugRoutes);
 
 // Error Handling Middleware

@@ -27,32 +27,45 @@ export const generateToken = (user) => {
  */
 export const register = async (req, res, next) => {
   try {
-    const { name, badgeId, password, role, region } = req.body;
+    const { name, badgeId, username, password, role, region } = req.body;
 
-    // Validation
-    if (!name || !badgeId || !password) {
+    // Accept either badgeId or username for client flexibility
+    const rawBadgeId = badgeId || username;
+
+    // Required fields check
+    if (!name || !rawBadgeId || !password) {
       return res.status(400).json({
         success: false,
         message: 'Please provide name, badgeId, and password',
       });
     }
 
-    const cleanBadgeId = String(badgeId).trim().toUpperCase();
+    const cleanName = String(name).trim();
+    const cleanBadgeId = String(rawBadgeId).trim().toUpperCase();
+    const cleanPassword = String(password).trim();
 
-    // Check if user already exists
+    // Enforce minimum password length matching Mongoose schema
+    if (cleanPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long',
+      });
+    }
+
+    // Check if user already exists in MongoDB
     const userExists = await User.findOne({ badgeId: cleanBadgeId });
     if (userExists) {
       return res.status(400).json({
         success: false,
-        message: `An officer account with Badge ID '${cleanBadgeId}' is already registered`,
+        message: `An account with Badge ID '${cleanBadgeId}' is already registered`,
       });
     }
 
     // Create user (password is automatically hashed via pre-save hook in User model)
     const user = await User.create({
-      name: String(name).trim(),
+      name: cleanName,
       badgeId: cleanBadgeId,
-      password,
+      password: cleanPassword,
       role: role === 'Admin' ? 'Admin' : 'Field Officer',
       region: region ? String(region).trim() : 'Gujarat',
     });
@@ -61,7 +74,7 @@ export const register = async (req, res, next) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Officer account registered successfully',
+      message: 'Account registered successfully in National Metrology Database',
       token,
       user: {
         id: user._id,
@@ -72,6 +85,21 @@ export const register = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors)
+        .map((val) => val.message)
+        .join(', ');
+      return res.status(400).json({
+        success: false,
+        message: messages || 'Registration validation failed',
+      });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this Badge ID or Username already exists',
+      });
+    }
     next(error);
   }
 };
@@ -136,6 +164,15 @@ export const login = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials: Password does not match',
+      });
+    }
+
+    // Role verification (if role was selected by user)
+    const { role } = req.body;
+    if (role && user.role !== role) {
+      return res.status(401).json({
+        success: false,
+        message: `Role mismatch: This account is registered as '${user.role}', but you selected '${role}'. Please switch role to proceed.`,
       });
     }
 

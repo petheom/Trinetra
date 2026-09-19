@@ -2,8 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import {
   authAPI,
   inspectionAPI,
+  reportAPI,
   mapBackendReportToFrontend,
   type CreateInspectionPayload,
+  type CreateReportPayload,
 } from '../utils/api';
 import ToastContainer, { type ToastItem } from '../components/Toast';
 
@@ -21,6 +23,11 @@ export interface InspectionReport {
   id: string;
   _id?: string;
   docketId?: string;
+  shopName?: string;
+  address?: string;
+  equipmentChecked?: string;
+  status?: 'Pass' | 'Fail' | 'Pending' | 'Compliant' | 'Non-Compliant';
+  remarks?: string;
   productName: string;
   brand: string;
   category: string;
@@ -57,6 +64,7 @@ interface TriNetraContextType {
   reportsError: string | null;
   fetchReports: (options?: { region?: string; verdict?: string; search?: string }) => Promise<void>;
   submitInspection: (payload: CreateInspectionPayload) => Promise<InspectionReport>;
+  submitReport: (payload: import('../utils/api').CreateReportPayload) => Promise<InspectionReport>;
   showToast: (message: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
   addReport: (
     report: Omit<InspectionReport, 'id' | 'inspectionDate' | 'officerName' | 'officerId' | 'region'> & {
@@ -69,7 +77,7 @@ interface TriNetraContextType {
   ) => InspectionReport;
 }
 
-const DEFAULT_REPORTS: InspectionReport[] = [
+export const DEFAULT_REPORTS: InspectionReport[] = [
   {
     id: 'TRN-9841',
     productName: 'Everest Chana Masala (100g Carton)',
@@ -203,16 +211,8 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
     }
   });
 
-  // Reports state
-  const [reports, setReports] = useState<InspectionReport[]>(() => {
-    try {
-      const saved = localStorage.getItem('trinetra_reports');
-      return saved ? JSON.parse(saved) : DEFAULT_REPORTS;
-    } catch {
-      return DEFAULT_REPORTS;
-    }
-  });
-
+  // State: inspection reports loaded directly from MongoDB
+  const [reports, setReports] = useState<InspectionReport[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
 
@@ -308,6 +308,9 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem('activeSession', JSON.stringify(newOfficer));
       localStorage.setItem('trinetra_officer', JSON.stringify(newOfficer));
+      localStorage.setItem('role', role);
+      localStorage.setItem('userRole', role);
+      localStorage.setItem('badgeId', badgeId);
       if (jwtToken) {
         localStorage.setItem('token', jwtToken);
       }
@@ -323,6 +326,9 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.removeItem('activeSession');
       localStorage.removeItem('trinetra_officer');
+      localStorage.removeItem('role');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('badgeId');
       localStorage.removeItem('token');
       localStorage.removeItem('trinetra_jwt');
     } catch (e) {
@@ -344,26 +350,38 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
       setReportsError(null);
 
       try {
-        const isAdmin = officer?.role === 'Admin';
-        let res;
+        // Use dedicated reportAPI (/api/reports) to fetch live MongoDB reports
+        const res = await reportAPI.getReports({
+          search: options?.search,
+          limit: 100,
+        });
 
+        if (res && res.success && Array.isArray(res.reports)) {
+          const mapped = res.reports.map(mapBackendReportToFrontend);
+          setReports(mapped);
+          return;
+        }
+
+        // Fallback to inspectionAPI if reports endpoint returns empty
+        const isAdmin = officer?.role === 'Admin';
+        let fallbackRes;
         if (isAdmin) {
-          res = await inspectionAPI.getAllReports({
+          fallbackRes = await inspectionAPI.getAllReports({
             region: options?.region && options.region !== 'All' ? options.region : undefined,
             verdict: options?.verdict && options.verdict !== 'All' ? options.verdict : undefined,
             search: options?.search,
             limit: 100,
           });
         } else {
-          res = await inspectionAPI.getMyReports({
+          fallbackRes = await inspectionAPI.getMyReports({
             verdict: options?.verdict && options.verdict !== 'All' ? options.verdict : undefined,
             search: options?.search,
             limit: 100,
           });
         }
 
-        if (res && res.success && Array.isArray(res.reports)) {
-          const mapped = res.reports.map(mapBackendReportToFrontend);
+        if (fallbackRes && fallbackRes.success && Array.isArray(fallbackRes.reports)) {
+          const mapped = fallbackRes.reports.map(mapBackendReportToFrontend);
           setReports(mapped);
         }
       } catch (err: any) {
@@ -408,6 +426,27 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Submit on-site field inspection report directly to POST /api/reports
+   */
+  const submitReport = async (payload: CreateReportPayload): Promise<InspectionReport> => {
+    try {
+      const response = await reportAPI.createReport(payload);
+
+      if (response && response.success && response.report) {
+        const newReport = mapBackendReportToFrontend(response.report);
+        setReports((prev) => [newReport, ...prev]);
+        showToast(`Inspection for ${newReport.shopName || newReport.productName} registered successfully in MongoDB!`, 'success');
+        return newReport;
+      }
+      throw new Error(response?.message || 'Server rejected inspection report submission');
+    } catch (err: any) {
+      const errMsg = err?.message || 'Network error: Failed to save inspection report to server.';
+      showToast(errMsg, 'error');
+      throw err;
+    }
+  };
+
+  /**
    * Legacy addReport helper (backward-compatible)
    */
   const addReport = (
@@ -422,9 +461,7 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
     const newReport: InspectionReport = {
       ...reportData,
       id: reportData.id || `TRN-${Math.floor(1000 + Math.random() * 9000)}`,
-      inspectionDate:
-        reportData.inspectionDate ||
-        `Today, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      inspectionDate: reportData.inspectionDate || 'Today',
       officerName: reportData.officerName || officer?.name || 'Inspector Rajesh Varma',
       officerId: reportData.officerId || officer?.badgeId || 'INSP-GJ-2041',
       region: reportData.region || officer?.region || 'Ahmedabad',
@@ -447,6 +484,7 @@ export function TriNetraProvider({ children }: { children: React.ReactNode }) {
         reportsError,
         fetchReports,
         submitInspection,
+        submitReport,
         showToast,
         addReport,
       }}

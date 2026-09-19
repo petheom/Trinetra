@@ -68,30 +68,40 @@ export function analyzePackagingText(
 
   // -------------------------------------------------------------
   // 1. MRP / Maximum Retail Price Check (Rule 6(1)(e))
-  // Mandatory keyword variations: MRP, M.R.P., Max Retail Price, Maximum Retail Price, ₹, Rs, Incl of all taxes
+  // Mandatory keyword variations: MRP, M.R.P., Max Retail Price, ₹, Rs, R5, INR, Incl of all taxes
   // -------------------------------------------------------------
   const mrpRegexes = [
-    /\b(?:m\.?r\.?p\.?|max(?:imum)?\s*retail\s*price|mrp)\b/i,
-    /(?:₹|rs\.?|inr)\s*[\d,]+(?:\.\d{2})?/i,
+    /\b(?:m\.?\s*r\.?\s*p\.?|max(?:imum)?\s*retail\s*price|retail\s*price)\b/i,
+    /(?:₹|rs\.?|inr|r5\.?)\s*[\d,]+(?:\.\d{2})?/i,
+    /\b[\d,]+(?:\.\d{2})?\s*(?:₹|rs\.?|inr)\b/i,
     /(?:incl(?:usive)?\.?\s*of\s*all\s*taxes|सकल\s*मूल्य|कर\s*सहित)/i,
-    /\b(?:price|retail\s*price)\b/i,
+    /\b(?:price|retail\s*price|all\s*taxes|incl\.?\s*taxes)\b/i,
   ];
 
   const mrpFound = findMatchingLine(lines, mrpRegexes);
   const hasMrpVariation =
     lowerText.includes('mrp') ||
     lowerText.includes('m.r.p') ||
+    lowerText.includes('m r p') ||
     lowerText.includes('maximum retail price') ||
     lowerText.includes('max retail price') ||
     lowerText.includes('max. retail price') ||
     lowerText.includes('retail price') ||
+    lowerText.includes('price') ||
     lowerText.includes('₹') ||
     lowerText.includes('rs.') ||
     lowerText.includes('rs ') ||
+    lowerText.includes('rs-') ||
+    lowerText.includes('rs:') ||
     lowerText.includes('inr') ||
-    lowerText.includes('incl. of all taxes') ||
-    lowerText.includes('inclusive of all taxes') ||
-    lowerText.includes('all taxes');
+    lowerText.includes('r5.') ||
+    lowerText.includes('r5 ') ||
+    lowerText.includes('r5:') ||
+    lowerText.includes('all taxes') ||
+    lowerText.includes('taxes') ||
+    lowerText.includes('कर सहित') ||
+    lowerText.includes('सकल मूल्य') ||
+    mrpRegexes.some((rx) => rx.test(safeText));
 
   const mrpRule: RuleCheckResult = {
     id: 'mrp',
@@ -108,12 +118,14 @@ export function analyzePackagingText(
 
   // -------------------------------------------------------------
   // 2. Net Weight / Net Quantity Check (Rule 6(1)(c))
-  // Mandatory keyword variations: Net Weight, Net Wt, Net Qty, Net Quantity, Net Content, Net Vol, metric units
+  // Flexible regex handling OCR misreads (e.g. "120 g" as "1209", "120 q", "m1" for "ml")
   // -------------------------------------------------------------
   const netQtyRegexes = [
-    /\b(?:net\s*(?:wt\.?|weight|qty\.?|quantity|content|contents|vol\.?|volume)|शुद्ध\s*वजन)\b/i,
     /\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres|liter|liters|units|pieces|pcs|n|u)\b/i,
-    /\b(?:quantity|weight|qty|net)\s*:\s*\d+/i,
+    /(?:net\s*(?:wt\.?|weight|qty\.?|quantity|content|contents|vol\.?|volume)?|wt\.?|weight|qty\.?|quantity|content|volume|vol|gross\s*wt|मात्रा|शुद्ध\s*वजन)[\s:.-]*(\d+(?:\.\d+)?)/i,
+    /(?:net|wt|weight|qty|quantity|content|pack)[\s\w:.-]{0,15}\b\d{1,4}\s*[9qg]\b/i,
+    /\b\d{2,4}\s*[9q]\b/i,
+    /\b(?:net\s*(?:wt\.?|weight|qty\.?|quantity|content|contents|vol\.?|volume)|शुद्ध\s*वजन)\b/i,
   ];
 
   const netQtyFound = findMatchingLine(lines, netQtyRegexes);
@@ -124,11 +136,16 @@ export function analyzePackagingText(
     lowerText.includes('net qty') ||
     lowerText.includes('net quantity') ||
     lowerText.includes('net content') ||
+    lowerText.includes('net contents') ||
     lowerText.includes('net volume') ||
     lowerText.includes('net vol') ||
     lowerText.includes('शुद्ध वजन') ||
-    /\b\d+\s*(?:kg|g|gm|gms|ml|l|ltr|pcs|units|pieces)\b/i.test(lowerText) ||
-    /\b(?:weight|qty|quantity)\s*[:=]/i.test(lowerText);
+    lowerText.includes('मात्रा') ||
+    /\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres|liter|liters|pieces|pcs|units)\b/i.test(safeText) ||
+    /(?:net\s*(?:wt|weight|qty|quantity|content|vol)?|wt|weight|qty|quantity)[\s:.-]*\d+/i.test(safeText) ||
+    (/\b\d{2,4}\s*[9q]\b/i.test(safeText) &&
+      (lowerText.includes('net') || lowerText.includes('wt') || lowerText.includes('weight') || lowerText.includes('qty') || lowerText.includes('g') || lowerText.includes('pack'))) ||
+    netQtyRegexes.some((rx) => rx.test(safeText));
 
   const netQtyRule: RuleCheckResult = {
     id: 'net_qty',
@@ -136,7 +153,7 @@ export function analyzePackagingText(
     label: 'Net Weight / Quantity',
     status: hasNetQtyVariation ? 'Compliant' : 'Non-Compliant',
     statusLabel: hasNetQtyVariation ? 'Net Quantity Verified' : 'Missing Net Weight/Qty',
-    extractedSnippet: netQtyFound?.line || (hasNetQtyVariation ? 'Net weight metric unit detected in text' : '[Not detected in scanned packaging text]'),
+    extractedSnippet: netQtyFound?.line || (hasNetQtyVariation ? 'Metric weight/quantity declaration detected in text' : '[Not detected in scanned packaging text]'),
     explanation: hasNetQtyVariation
       ? 'Statutory standard metric quantity declaration conforming to Rule 6(1)(c) identified.'
       : 'Mandatory standard metric quantity/weight declaration was not found.',
@@ -149,10 +166,14 @@ export function analyzePackagingText(
   // -------------------------------------------------------------
   const mfgRegexes = [
     /\b(?:mfg\.?\s*date|date\s*of\s*mfg|mfd\.?\s*date|date\s*of\s*manufactur(?:e|ing)|mfg\.?|mfd\.?)\b/i,
-    /\b(?:pkd\.?\s*date|date\s*of\s*pkd|date\s*of\s*pack(?:ing)?|packed\s*on|pkd\.?|packing)\b/i,
-    /\b(?:best\s*before|use\s*by|exp\.?\s*date|expiry\s*date|exp\.?)\b/i,
+    /\b(?:pkd\.?\s*date|date\s*of\s*pkd|date\s*of\s*pack(?:ing)?|packed\s*on|pkd\.?|packing|pckd)\b/i,
+    /\b(?:best\s*before|use\s*by|exp\.?\s*date|expiry\s*date|exp\.?|expiry)\b/i,
     /\b(?:batch\s*(?:no\.?|number)|lot\s*(?:no\.?|number)|b\.?\s*no\.?)\b/i,
-    /\b\d{1,2}[/.-]\d{2,4}\b/,
+    // Month name with year (Jan 2024, May 24)
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s'.-]*\d{2,4}\b/i,
+    // Date formats (MM/YYYY, MM/YY, DD/MM/YYYY, DD-MM-YY)
+    /\b(0?[1-9]|1[0-2])[/.-](20\d{2}|\d{2})\b/,
+    /\b(0?[1-9]|[12]\d|3[01])[/.-](0?[1-9]|1[0-2])[/.-](20\d{2}|\d{2})\b/,
   ];
 
   const mfgFound = findMatchingLine(lines, mfgRegexes);
@@ -163,21 +184,25 @@ export function analyzePackagingText(
     lowerText.includes('mfd date') ||
     lowerText.includes('mfd. date') ||
     lowerText.includes('date of manufacture') ||
+    lowerText.includes('manufactured') ||
     lowerText.includes('mfg') ||
     lowerText.includes('mfd') ||
     lowerText.includes('pkd') ||
+    lowerText.includes('pckd') ||
     lowerText.includes('pkd date') ||
     lowerText.includes('date of packing') ||
     lowerText.includes('date of pkd') ||
     lowerText.includes('packed on') ||
-    lowerText.includes('packed:') ||
+    lowerText.includes('packing') ||
     lowerText.includes('best before') ||
     lowerText.includes('use by') ||
     lowerText.includes('exp date') ||
     lowerText.includes('expiry') ||
     lowerText.includes('batch no') ||
+    lowerText.includes('batch') ||
     lowerText.includes('b.no') ||
-    /\b(?:mfg|pkd|mfd)\b/i.test(lowerText);
+    lowerText.includes('lot no') ||
+    mfgRegexes.some((rx) => rx.test(safeText));
 
   const mfgRule: RuleCheckResult = {
     id: 'mfg_date',
@@ -194,34 +219,40 @@ export function analyzePackagingText(
 
   // -------------------------------------------------------------
   // 4. Customer Care / Contact Details Check (Rule 6(1)(g) & (a))
-  // Mandatory keyword variations: Customer Care, Consumer Care, Contact, Helpline, Toll Free, Care@, Feedback, Grievance, Email
+  // Forgiving search: checks for "@", "email", "toll", "care", "1800", or "www" across entire text block
   // -------------------------------------------------------------
   const careRegexes = [
-    /\b(?:customer\s*care|consumer\s*care|consumer\s*cell|customer\s*support|care\s*cell)\b/i,
-    /\b(?:toll\s*free|helpline|care@|feedback|complaint|grievance)\b/i,
-    /\b(?:contact\s*(?:us|person|no\.?|details)?|tele?phone|tel\s*:|phone\s*:)\b/i,
-    /\b(?:1800[-\s]?\d{3}[-\s]?\d{3,4}|\+?91[-\s]?\d{10}|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/,
+    /\b(?:customer\s*care|consumer\s*care|consumer\s*cell|customer\s*support|care\s*cell|careline|care\s*line)\b/i,
+    /\b(?:toll\s*free|tollfree|helpline|help\s*line|feedback|complaint|grievance)\b/i,
+    /@|e-?mail|care@|support@|feedback@/i,
+    /\b(?:1800[-\s]?\d{3}[-\s]?\d{3,4}|(?:\+?91|0)?[-\s]?[6-9]\d{9}|\d{3,4}[-\s]?\d{6,8})\b/,
+    /\b(?:www\.[a-z0-9-]+|\b[a-z0-9-]+(?:\.com|\.in|\.org|\.co\.in|\.net))\b/i,
+    /\b(?:contact\s*(?:us|person|no\.?|details)?|tele?phone|tel\s*:|phone\s*:|call\s*us|write\s*to)\b/i,
   ];
 
   const careFound = findMatchingLine(lines, careRegexes);
   const hasCareVariation =
-    lowerText.includes('customer care') ||
-    lowerText.includes('consumer care') ||
-    lowerText.includes('care cell') ||
-    lowerText.includes('consumer cell') ||
-    lowerText.includes('customer support') ||
-    lowerText.includes('toll free') ||
-    lowerText.includes('toll-free') ||
+    lowerText.includes('@') ||
+    lowerText.includes('email') ||
+    lowerText.includes('e-mail') ||
+    lowerText.includes('e_mail') ||
+    lowerText.includes('toll') ||
+    lowerText.includes('care') ||
+    lowerText.includes('1800') ||
+    lowerText.includes('www') ||
+    lowerText.includes('.com') ||
+    lowerText.includes('.in') ||
+    lowerText.includes('.org') ||
     lowerText.includes('helpline') ||
-    lowerText.includes('care@') ||
-    lowerText.includes('contact us') ||
-    lowerText.includes('contact:') ||
     lowerText.includes('feedback') ||
     lowerText.includes('complaint') ||
     lowerText.includes('grievance') ||
-    lowerText.includes('email') ||
+    lowerText.includes('consumer') ||
+    lowerText.includes('customer') ||
+    lowerText.includes('contact') ||
     lowerText.includes('phone') ||
-    lowerText.includes('tel:');
+    lowerText.includes('tel:') ||
+    careRegexes.some((rx) => rx.test(safeText));
 
   const careRule: RuleCheckResult = {
     id: 'customer_care',

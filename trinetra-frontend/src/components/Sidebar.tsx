@@ -478,9 +478,19 @@ export default function Sidebar({
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-2 py-1.5 text-[11px] font-medium text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{activeRole} Active</span>
+                <div
+                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider ${
+                    isAdmin
+                      ? 'border-rose-800/80 bg-rose-950/50 text-rose-400'
+                      : 'border-emerald-800/80 bg-emerald-950/50 text-emerald-400'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isAdmin ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'
+                    }`}
+                  />
+                  <span>Role: {activeRole}</span>
                 </div>
 
                 <button
