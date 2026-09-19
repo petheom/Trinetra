@@ -15,7 +15,8 @@ import {
   Briefcase,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
-import { DEFAULT_USERS, type RegisteredOfficer } from '../constants/seedUsers';
+import { authAPI } from '../utils/api';
+import type { RegisteredOfficer } from '../constants/seedUsers';
 
 interface LoginProps {
   initialMode?: 'login' | 'register';
@@ -24,7 +25,7 @@ interface LoginProps {
 export default function Login({ initialMode }: LoginProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useTriNetra();
+  const { login, showToast } = useTriNetra();
 
   // Mode: 'login' | 'register' (if register, redirect to /signup once)
   useEffect(() => {
@@ -64,32 +65,6 @@ export default function Login({ initialMode }: LoginProps = {}) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-
-  // Safe helper to read users from localStorage
-  const getRegisteredAccounts = (): RegisteredOfficer[] => {
-    try {
-      const stored = localStorage.getItem('users');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-      const legacy = localStorage.getItem('trinetra_registered_officers');
-      if (legacy) {
-        const parsed = JSON.parse(legacy);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-      // Seed default accounts if empty
-      localStorage.setItem('users', JSON.stringify(DEFAULT_USERS));
-      localStorage.setItem('trinetra_registered_officers', JSON.stringify(DEFAULT_USERS));
-      return DEFAULT_USERS;
-    } catch {
-      return DEFAULT_USERS;
-    }
-  };
 
   // Google SSO Simulation
   const handleGoogleLogin = () => {
@@ -135,7 +110,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
     }, 400);
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -144,7 +119,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
     const trimmedPassword = password.trim();
 
     if (!trimmedUsername) {
-      setErrorMessage('Please enter your Username or Email.');
+      setErrorMessage('Please enter your Username or Badge ID.');
       return;
     }
     if (!trimmedPassword) {
@@ -154,125 +129,92 @@ export default function Login({ initialMode }: LoginProps = {}) {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      try {
-        const normalizedInput = trimmedUsername.toLowerCase();
-        const registered = getRegisteredAccounts();
+    try {
+      // 1. Attempt genuine authentication via Node.js Express API
+      const response = await authAPI.login({
+        badgeId: trimmedUsername,
+        username: trimmedUsername,
+        password: trimmedPassword,
+      });
 
-        // 1. Check matching against registered accounts in localStorage
-        const matched = registered.find((o) => {
-          const badgeMatch = String(o?.badgeId || '').toLowerCase() === normalizedInput;
-          const nameMatch = String(o?.name || '').toLowerCase() === normalizedInput;
-          const userPrefixMatch = String(o?.badgeId || '')
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '')
-            .includes(normalizedInput);
+      if (response && response.success && response.user) {
+        const { user, token } = response;
+        const safeRole = user.role === 'Admin' ? 'Admin' : 'Field Officer';
 
-          const roleMatch =
-            (normalizedInput === 'admin' && o?.role === 'Admin') ||
-            (normalizedInput === 'officer' && o?.role === 'Field Officer');
-
-          return badgeMatch || nameMatch || userPrefixMatch || roleMatch;
-        });
-
-        // 2. Developer & Tester Fallback: If no account matched or database is fresh,
-        // but user enters default test credentials, automatically provision and log in!
-        if (!matched) {
-          if (
-            (normalizedInput === 'admin' || normalizedInput === 'admin@trinetra.gov.in') &&
-            trimmedPassword === 'admin123'
-          ) {
-            const fallbackAdmin = {
-              badgeId: 'ADMIN-HQ-01',
-              name: 'Director Amit Trivedi',
-              role: 'Admin' as const,
-              region: 'Delhi (NCT)',
-              loginTime: new Date().toISOString(),
-            };
-            localStorage.setItem('activeSession', JSON.stringify(fallbackAdmin));
-            localStorage.setItem('trinetra_officer', JSON.stringify(fallbackAdmin));
-            login(
-              fallbackAdmin.badgeId,
-              fallbackAdmin.name,
-              fallbackAdmin.region,
-              fallbackAdmin.role
-            );
-            setIsLoading(false);
-            navigate('/dashboard', { replace: true });
-            return;
-          }
-
-          if (
-            (normalizedInput === 'officer' || normalizedInput === 'officer@trinetra.gov.in') &&
-            (trimmedPassword === 'GovPass#2026' || trimmedPassword === 'officer123')
-          ) {
-            const fallbackOfficer = {
-              badgeId: 'INSP-GJ-2041',
-              name: 'Inspector Rajesh Varma',
-              role: 'Field Officer' as const,
-              region: 'Gujarat',
-              loginTime: new Date().toISOString(),
-            };
-            localStorage.setItem('activeSession', JSON.stringify(fallbackOfficer));
-            localStorage.setItem('trinetra_officer', JSON.stringify(fallbackOfficer));
-            login(
-              fallbackOfficer.badgeId,
-              fallbackOfficer.name,
-              fallbackOfficer.region,
-              fallbackOfficer.role
-            );
-            setIsLoading(false);
-            navigate('/dashboard', { replace: true });
-            return;
-          }
-
-          setErrorMessage(
-            `Account "${trimmedUsername}" was not found. Use "admin" / "admin123" or sign up for a new profile.`
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        // Validate password (or permit default bypass for test convenience)
-        const isPasswordValid =
-          matched.passwordHash === trimmedPassword ||
-          (matched.role === 'Admin' && trimmedPassword === 'admin123') ||
-          (matched.role === 'Field Officer' && trimmedPassword === 'GovPass#2026');
-
-        if (!isPasswordValid) {
-          setErrorMessage('Incorrect password. Please verify your credentials or use the test presets below.');
-          setIsLoading(false);
-          return;
-        }
-
-        // Credentials are valid: Save complete activeSession object in localStorage
-        const activeSessionData = {
-          badgeId: matched.badgeId || (matched.role === 'Admin' ? 'ADMIN-HQ-01' : 'INSP-GJ-2041'),
-          name: matched.name || 'Officer',
-          role: matched.role || 'Field Officer',
-          region: matched.region || 'Gujarat',
-          loginTime: new Date().toISOString(),
-        };
-
-        localStorage.setItem('activeSession', JSON.stringify(activeSessionData));
-        localStorage.setItem('trinetra_officer', JSON.stringify(activeSessionData));
-
-        // Update context state
-        login(
-          activeSessionData.badgeId,
-          activeSessionData.name,
-          activeSessionData.region,
-          activeSessionData.role
-        );
+        // Persist token and active session in context and localStorage
+        login(user.badgeId, user.name, user.region, safeRole, token);
+        showToast(`Authenticated as ${user.name} (${user.badgeId}) • ${safeRole}`, 'success');
 
         setIsLoading(false);
         navigate('/dashboard', { replace: true });
-      } catch (err) {
-        console.error('Login validation error:', err);
-        setErrorMessage('An unexpected error occurred during login verification.');
-        setIsLoading(false);
+        return;
       }
-    }, 250);
+      throw new Error(response?.message || 'Authentication failed');
+    } catch (apiErr: any) {
+      console.warn('[Login] API login attempt failed or offline:', apiErr);
+      const apiMessage = apiErr?.message || 'Unable to connect to authentication server.';
+
+      // If backend returned explicit 400 or 401 client error (e.g. wrong password or badge not found)
+      if (apiErr.status === 400 || apiErr.status === 401) {
+        setErrorMessage(apiMessage);
+        showToast(apiMessage, 'error');
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Failsafe Offline / Developer Fallback for Testing when server is booting
+      const normalizedInput = trimmedUsername.toLowerCase();
+
+      if (
+        (normalizedInput === 'admin' || normalizedInput === 'admin@trinetra.gov.in') &&
+        trimmedPassword === 'admin123'
+      ) {
+        const fallbackAdmin = {
+          badgeId: 'ADMIN-HQ-01',
+          name: 'Director Amit Trivedi',
+          role: 'Admin' as const,
+          region: 'Delhi (NCT)',
+          loginTime: new Date().toISOString(),
+        };
+        login(
+          fallbackAdmin.badgeId,
+          fallbackAdmin.name,
+          fallbackAdmin.region,
+          fallbackAdmin.role
+        );
+        showToast('Running in offline developer mode (Server bootstrapping)', 'warning');
+        setIsLoading(false);
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+
+      if (
+        (normalizedInput === 'officer' || normalizedInput === 'officer@trinetra.gov.in') &&
+        (trimmedPassword === 'GovPass#2026' || trimmedPassword === 'officer123')
+      ) {
+        const fallbackOfficer = {
+          badgeId: 'INSP-GJ-2041',
+          name: 'Inspector Rajesh Varma',
+          role: 'Field Officer' as const,
+          region: 'Gujarat',
+          loginTime: new Date().toISOString(),
+        };
+        login(
+          fallbackOfficer.badgeId,
+          fallbackOfficer.name,
+          fallbackOfficer.region,
+          fallbackOfficer.role
+        );
+        showToast('Running in offline developer mode (Server bootstrapping)', 'warning');
+        setIsLoading(false);
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+
+      setErrorMessage(`${apiMessage} (Check that Node.js backend is running on port 5000)`);
+      showToast(apiMessage, 'error');
+      setIsLoading(false);
+    }
   };
 
   return (

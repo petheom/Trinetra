@@ -14,6 +14,7 @@ import {
   BarChart3,
   Settings,
   MapPin,
+  Database,
 } from 'lucide-react';
 import { useTriNetra, type UserRole } from '../context/TriNetraContext';
 
@@ -58,6 +59,7 @@ export default function Sidebar({
   };
 
   const isDashboardActive = location.pathname === '/dashboard';
+  const isAdminDashboardActive = location.pathname.startsWith('/admin');
   const isScannerActive = location.pathname.startsWith('/scanner') || location.pathname.startsWith('/inspection') || location.pathname.startsWith('/verification');
   const isReportsActive = location.pathname.startsWith('/reports');
   const isOfficerLogsActive = location.pathname.startsWith('/officer-logs');
@@ -185,6 +187,37 @@ export default function Sidebar({
                         {isDashboardActive && (
                           <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
                         )}
+                      </div>
+                    )}
+                  </Link>
+
+                  {/* Admin Live Data Grid */}
+                  <Link
+                    to="/admin-dashboard"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Admin Data Grid' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isAdminDashboardActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isAdminDashboardActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <Database className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Admin Data Grid</span>
+                        <span className="rounded-full bg-blue-500/20 text-blue-300 px-1.5 py-0.5 text-[9px] font-bold border border-blue-400/30">
+                          Live
+                        </span>
                       </div>
                     )}
                   </Link>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ShieldAlert,
@@ -21,13 +21,14 @@ import {
   CheckCircle2,
   AlertTriangle,
   Globe2,
+  RefreshCw,
 } from 'lucide-react';
 import { useTriNetra, type UserRole, type InspectionReport } from '../context/TriNetraContext';
 import { INDIAN_STATES } from '../constants/indianStates';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { officer, reports } = useTriNetra();
+  const { officer, reports, isLoadingReports, fetchReports } = useTriNetra();
 
   // Safely resolve current role
   const activeRole: UserRole = (() => {
@@ -64,6 +65,15 @@ export default function Dashboard() {
   const [selectedState, setSelectedState] = useState<string>('All');
   const [selectedVerdict, setSelectedVerdict] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Synchronize with backend API on mount and filter changes
+  useEffect(() => {
+    fetchReports({
+      region: isAdmin && selectedState !== 'All' ? selectedState : undefined,
+      verdict: selectedVerdict !== 'All' ? selectedVerdict : undefined,
+      search: searchQuery || undefined,
+    });
+  }, [isAdmin, selectedState, selectedVerdict, searchQuery, fetchReports]);
 
   // Filter states for Officer View
   const [officerCategoryFilter, setOfficerCategoryFilter] = useState<string>('All');
@@ -183,8 +193,29 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Action Button: Field Officer gets "Start Inspection", Admin gets "Review Officer Logs" */}
-        <div className="flex items-center gap-3">
+        {/* Action Buttons: Live Database Sync, Field Officer "Start Inspection", Admin "Review Officer Logs" */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() =>
+              fetchReports({
+                region: isAdmin && selectedState !== 'All' ? selectedState : undefined,
+                verdict: selectedVerdict !== 'All' ? selectedVerdict : undefined,
+                search: searchQuery || undefined,
+              })
+            }
+            disabled={isLoadingReports}
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-sm hover:bg-slate-50 transition active:scale-95 disabled:opacity-60 cursor-pointer"
+            title="Sync latest live inspections from MongoDB"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${
+                isLoadingReports ? 'animate-spin text-blue-600' : 'text-slate-500'
+              }`}
+            />
+            <span>{isLoadingReports ? 'Syncing...' : 'Live Sync'}</span>
+          </button>
+
           {isAdmin ? (
             <button
               type="button"

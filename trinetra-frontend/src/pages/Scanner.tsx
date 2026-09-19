@@ -41,7 +41,7 @@ type CategoryType = (typeof CATEGORIES)[number];
 
 export default function Scanner() {
   const navigate = useNavigate();
-  const { officer, addReport } = useTriNetra();
+  const { officer, addReport, submitInspection, showToast } = useTriNetra();
 
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('Food & Beverages');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -64,6 +64,7 @@ export default function Scanner() {
   const [analysisResult, setAnalysisResult] = useState<InspectionOcrAnalysis | null>(null);
   const [hasCopiedRawText, setHasCopiedRawText] = useState(false);
   const [savedReportId, setSavedReportId] = useState<string | null>(null);
+  const [isSavingReport, setIsSavingReport] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -312,26 +313,37 @@ export default function Scanner() {
     try {
       const imageSource = selectedFile || selectedImage;
 
-      const result = await Tesseract.recognize(imageSource!, 'eng', {
-        logger: (m) => {
-          if (!isMountedRef.current) return;
-          if (m && typeof m.progress === 'number') {
-            const pct = Math.min(Math.round(m.progress * 100), 98);
-            setScanProgress(pct);
+      let result: { data: { text?: string; confidence?: number } };
+      if (typeof window !== 'undefined' && (window as unknown as { mockTesseractOcrText?: string }).mockTesseractOcrText) {
+        setScanProgress(100);
+        result = {
+          data: {
+            text: (window as unknown as { mockTesseractOcrText: string }).mockTesseractOcrText,
+            confidence: 98,
+          },
+        };
+      } else {
+        result = await Tesseract.recognize(imageSource!, 'eng', {
+          logger: (m) => {
+            if (!isMountedRef.current) return;
+            if (m && typeof m.progress === 'number') {
+              const pct = Math.min(Math.round(m.progress * 100), 98);
+              setScanProgress(pct);
 
-            const status = String(m.status || '').toLowerCase();
-            if (status.includes('loading')) {
-              setScanStatusText(`Loading language weights... (${pct}%)`);
-            } else if (status.includes('init')) {
-              setScanStatusText(`Initializing OCR pipeline... (${pct}%)`);
-            } else if (status.includes('recogniz')) {
-              setScanStatusText(`Recognizing packaging typography & declarations... (${pct}%)`);
-            } else {
-              setScanStatusText(`Processing artwork frame... (${pct}%)`);
+              const status = String(m.status || '').toLowerCase();
+              if (status.includes('loading')) {
+                setScanStatusText(`Loading language weights... (${pct}%)`);
+              } else if (status.includes('init')) {
+                setScanStatusText(`Initializing OCR pipeline... (${pct}%)`);
+              } else if (status.includes('recogniz')) {
+                setScanStatusText(`Recognizing packaging typography & declarations... (${pct}%)`);
+              } else {
+                setScanStatusText(`Processing artwork frame... (${pct}%)`);
+              }
             }
-          }
-        },
-      });
+          },
+        });
+      }
 
       if (!isMountedRef.current) return;
 
@@ -374,28 +386,53 @@ export default function Scanner() {
   };
 
   // -------------------------------------------------------------
-  // Save genuine inspection report to context / localStorage
+  // Save genuine inspection report to Node.js backend /api/inspections
   // -------------------------------------------------------------
-  const handleSaveReport = () => {
+  const handleSaveReport = async () => {
     if (!analysisResult) return;
 
+    setIsSavingReport(true);
     try {
-      const createdReport = addReport({
+      // POST real OCR result to Node.js backend /api/inspections
+      const created = await submitInspection({
+        extractedText: analysisResult.rawText,
+        verdict: analysisResult.verdict === 'Compliant' ? 'Compliant' : 'Non-Compliant',
+        missingFields: analysisResult.missingFields,
+        reasonsForFailure: analysisResult.reasonsForFailure,
         productName: analysisResult.detectedProductName,
         brand: analysisResult.detectedBrand,
         category: selectedCategory,
-        location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
-        verdict: analysisResult.verdict,
-        violations: analysisResult.violations.length > 0 ? analysisResult.violations : undefined,
-        findings: analysisResult.summaryFindings,
         ocrConfidence: `${Math.round(analysisResult.confidence)}%`,
+        findings: analysisResult.summaryFindings,
+        violations: analysisResult.violations,
+        location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
+        region: officer?.region || 'Gujarat',
         imageUrl: selectedImage,
       });
 
-      setSavedReportId(createdReport.id);
+      setSavedReportId(created.id);
+      showToast(`Statutory Inspection Dossier #${created.id} saved to National Database`, 'success');
     } catch (e) {
-      console.error('Failed to save report:', e);
-      alert('Unable to persist report record. Please check browser storage permissions.');
+      console.warn('[Inspection API] Falling back to local offline persistence:', e);
+      try {
+        const fallback = addReport({
+          productName: analysisResult.detectedProductName,
+          brand: analysisResult.detectedBrand,
+          category: selectedCategory,
+          location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
+          verdict: analysisResult.verdict,
+          violations: analysisResult.violations.length > 0 ? analysisResult.violations : undefined,
+          findings: analysisResult.summaryFindings,
+          ocrConfidence: `${Math.round(analysisResult.confidence)}%`,
+          imageUrl: selectedImage,
+        });
+        setSavedReportId(fallback.id);
+        showToast(`Dossier #${fallback.id} cached locally (Offline mode)`, 'info');
+      } catch (fallbackErr) {
+        console.error('Failed to save fallback report:', fallbackErr);
+      }
+    } finally {
+      setIsSavingReport(false);
     }
   };
 
@@ -1232,10 +1269,20 @@ export default function Scanner() {
                       <button
                         type="button"
                         onClick={handleSaveReport}
-                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-500/25 hover:brightness-110 active:scale-95 transition cursor-pointer"
+                        disabled={isSavingReport}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-500/25 hover:brightness-110 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
                       >
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>Save to Enforcement Docket</span>
+                        {isSavingReport ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Saving Dossier to Server...</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="h-4 w-4" />
+                            <span>Save to Enforcement Docket</span>
+                          </>
+                        )}
                       </button>
                     ) : (
                       <div className="flex-1 flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-3">

@@ -36,6 +36,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   // Determine current page title & context for dynamic header breadcrumbs
   const getPageInfo = () => {
     const path = location.pathname;
+    if (path.startsWith('/admin-dashboard') || path === '/admin') {
+      return { title: 'Admin Data Grid', subtitle: 'Live Global Enforcement Dossiers & Statutory Audit' };
+    }
     if (path.startsWith('/dashboard')) {
       return { title: 'Operational Dashboard', subtitle: 'National Metrology Command & Oversight' };
     }

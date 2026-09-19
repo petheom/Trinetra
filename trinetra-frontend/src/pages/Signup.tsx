@@ -16,6 +16,7 @@ import {
   Briefcase,
 } from 'lucide-react';
 import { useTriNetra, type UserRole } from '../context/TriNetraContext';
+import { authAPI } from '../utils/api';
 import { INDIAN_STATES, type IndianStateType } from '../constants/indianStates';
 import { DEFAULT_USERS, type RegisteredOfficer } from '../constants/seedUsers';
 
@@ -26,7 +27,7 @@ export type { RegisteredOfficer };
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { login } = useTriNetra();
+  const { login, showToast } = useTriNetra();
   const isSubmittingRef = useRef(false);
 
   // Form input fields
@@ -147,7 +148,7 @@ export default function Signup() {
   };
 
   // Main Form Submission Handler
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -199,25 +200,57 @@ export default function Signup() {
       return;
     }
 
-    // 2. Duplicate Badge ID Verification
-    try {
-      const existingOfficers = getRegisteredAccounts();
-      const duplicate = existingOfficers.find((o) => String(o?.badgeId || '').toUpperCase() === trimmedId);
-      if (duplicate) {
-        setErrorMessage(
-          `Badge ID "${trimmedId}" is already enrolled in the Pan-India Metrology Grid. Please log in directly or specify a unique ID.`
-        );
-        return;
-      }
-    } catch (checkErr) {
-      console.warn('Warning during duplicate badge verification:', checkErr);
-    }
-
     setIsLoading(true);
     isSubmittingRef.current = true;
 
-    // 3. Persist and Navigate to Login Safely
-    setTimeout(() => {
+    try {
+      // 2. Submit to Node.js Backend API
+      const response = await authAPI.register({
+        name: trimmedName,
+        badgeId: trimmedId,
+        password: trimmedPassword,
+        role: role === 'Admin' ? 'Admin' : 'Field Officer',
+        region: trimmedRegion,
+      });
+
+      if (response && response.success) {
+        showToast(
+          `Profile for ${trimmedName} (${trimmedId}) enrolled successfully in National Metrology Database!`,
+          'success'
+        );
+
+        setSuccessMessage(
+          `National profile for ${trimmedName} (${trimmedId} • ${role} • ${trimmedRegion}) enrolled successfully! Redirecting to login...`
+        );
+
+        setTimeout(() => {
+          setIsLoading(false);
+          isSubmittingRef.current = false;
+          navigate('/login', {
+            replace: true,
+            state: {
+              registeredBadge: trimmedId,
+              message: `Credentials enrolled for ${trimmedName} (${trimmedId}) as ${role} [${trimmedRegion}]! Please sign in.`,
+            },
+          });
+        }, 600);
+        return;
+      }
+      throw new Error(response?.message || 'Enrollment rejected by server.');
+    } catch (apiErr: any) {
+      console.warn('[Signup] API error during registration:', apiErr);
+      const errMsg = apiErr?.message || 'Failed to enroll account with server.';
+
+      // If backend reports duplicate badge or validation issue
+      if (apiErr.status === 400) {
+        setErrorMessage(errMsg);
+        showToast(errMsg, 'error');
+        setIsLoading(false);
+        isSubmittingRef.current = false;
+        return;
+      }
+
+      // Offline fallback: Persist locally so developer testing is unblocked
       try {
         const newOfficer: RegisteredOfficer = {
           badgeId: trimmedId,
@@ -226,37 +259,31 @@ export default function Signup() {
           role: role,
           region: trimmedRegion,
         };
-
-        const result = persistOfficerAccount(newOfficer);
-        if (!result.success) {
-          setErrorMessage(result.error || 'Failed to save officer credentials to local storage.');
-          setIsLoading(false);
-          isSubmittingRef.current = false;
-          return;
-        }
+        persistOfficerAccount(newOfficer);
+        showToast('Enrolled in offline mode (Server is currently bootstrapping)', 'warning');
 
         setSuccessMessage(
-          `National profile for ${trimmedName} (${trimmedId} • ${role} • ${trimmedRegion}) enrolled successfully! Redirecting to login...`
+          `Profile for ${trimmedName} (${trimmedId}) enrolled locally. Redirecting to login...`
         );
 
-        // Navigate cleanly to Login with state
         setTimeout(() => {
           setIsLoading(false);
+          isSubmittingRef.current = false;
           navigate('/login', {
             replace: true,
             state: {
               registeredBadge: trimmedId,
-              message: `Credentials enrolled for ${trimmedName} (${trimmedId}) as ${role} [${trimmedRegion}]! Please sign in.`,
+              message: `Credentials enrolled for ${trimmedName} (${trimmedId})! Please sign in.`,
             },
           });
-        }, 500);
-      } catch (err) {
-        console.error('Unhandled registration error:', err);
-        setErrorMessage('An unexpected error occurred while finalizing enrollment. Please try again.');
+        }, 600);
+      } catch {
+        setErrorMessage(errMsg);
+        showToast(errMsg, 'error');
         setIsLoading(false);
         isSubmittingRef.current = false;
       }
-    }, 400);
+    }
   };
 
   return (

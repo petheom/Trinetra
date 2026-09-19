@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   FileText,
@@ -14,13 +14,19 @@ import {
   MapPin,
   Filter,
   Calendar,
+  RefreshCw,
 } from 'lucide-react';
 import { useTriNetra, type InspectionReport } from '../context/TriNetraContext';
 import { generateSavedReportPdf } from '../utils/generatePdfReport';
 
 export default function Reports() {
   const location = useLocation();
-  const { reports } = useTriNetra();
+  const { reports, isLoadingReports, fetchReports } = useTriNetra();
+
+  // Automatically fetch latest live reports from backend on page view
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
 
   // Highlight newest report if navigated here from verification
   const newReportId = (location.state as { newReportId?: string } | null)?.newReportId;
@@ -97,12 +103,29 @@ export default function Reports() {
           </p>
         </div>
 
-        {/* Global Print / Bulk Download Trigger */}
+        {/* Action Controls: Live Database Sync & Print */}
         <div className="flex items-center gap-3">
           <button
             type="button"
+            onClick={() => fetchReports()}
+            disabled={isLoadingReports}
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-slate-400 active:scale-95 disabled:opacity-60 cursor-pointer"
+            title="Sync latest live inspections from MongoDB"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${
+                isLoadingReports ? 'animate-spin text-blue-600' : 'text-slate-500'
+              }`}
+            />
+            <span className="hidden sm:inline">
+              {isLoadingReports ? 'Syncing...' : 'Live Sync'}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-slate-400 hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-slate-400 hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
           >
             <Printer className="h-4 w-4 text-slate-500" />
             <span className="hidden sm:inline">Print Dossier Sheet</span>

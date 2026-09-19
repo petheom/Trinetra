@@ -13,6 +13,7 @@ import Reports from './pages/Reports';
 import OfficerLogs from './pages/OfficerLogs';
 import RegionalAnalytics from './pages/RegionalAnalytics';
 import SystemSettings from './pages/SystemSettings';
+import AdminDashboard from './pages/AdminDashboard';
 
 // 1. Clean Enterprise Auth Layout: displays clean TriNetra logo & brand with ZERO public navbar links
 function AuthLayout() {
@@ -172,6 +173,8 @@ export default function App() {
 
                 {/* Admin Only Routes */}
                 <Route element={<RoleProtectedRoute allowedRoles={['Admin']} />}>
+                  <Route path="/admin-dashboard" element={<AdminDashboard />} />
+                  <Route path="/admin" element={<AdminDashboard />} />
                   <Route path="/officer-logs" element={<OfficerLogs />} />
                   <Route path="/regional-analytics" element={<RegionalAnalytics />} />
                   <Route path="/system-settings" element={<SystemSettings />} />
