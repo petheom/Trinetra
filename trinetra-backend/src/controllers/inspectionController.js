@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Report from '../models/Report.js';
 
 /**
@@ -8,6 +9,7 @@ import Report from '../models/Report.js';
 export const createInspection = async (req, res, next) => {
   try {
     const {
+      docketId,
       extractedText,
       verdict,
       missingFields,
@@ -33,10 +35,10 @@ export const createInspection = async (req, res, next) => {
       });
     }
 
-    if (!verdict || !['Compliant', 'Non-Compliant'].includes(verdict)) {
+    if (!verdict || !['Compliant', 'Non-Compliant', 'Manual Review'].includes(verdict)) {
       return res.status(400).json({
         success: false,
-        message: "A valid statutory verdict ('Compliant' or 'Non-Compliant') is required",
+        message: "A valid statutory verdict ('Compliant', 'Non-Compliant', or 'Manual Review') is required",
       });
     }
 
@@ -53,6 +55,7 @@ export const createInspection = async (req, res, next) => {
 
     // 4. Create and persist the report in MongoDB
     const report = await Report.create({
+      docketId: docketId ? String(docketId).trim().toUpperCase() : undefined,
       officer: officerRef,
       officerId,
       officerName,
@@ -104,7 +107,7 @@ export const getMyReports = async (req, res, next) => {
     };
 
     // Filter by verdict if provided
-    if (verdict && ['Compliant', 'Non-Compliant'].includes(verdict)) {
+    if (verdict && ['Compliant', 'Non-Compliant', 'Manual Review'].includes(verdict)) {
       query.verdict = verdict;
     }
 
@@ -179,7 +182,7 @@ export const getAllReports = async (req, res, next) => {
     }
 
     // Filter by statutory verdict
-    if (verdict && verdict !== 'All' && ['Compliant', 'Non-Compliant'].includes(verdict)) {
+    if (verdict && verdict !== 'All' && ['Compliant', 'Non-Compliant', 'Manual Review'].includes(verdict)) {
       query.verdict = verdict;
     }
 
@@ -192,6 +195,7 @@ export const getAllReports = async (req, res, next) => {
     if (search && search.trim()) {
       const regex = new RegExp(search.trim(), 'i');
       query.$or = [
+        { docketId: regex },
         { productName: regex },
         { brand: regex },
         { officerName: regex },
@@ -260,10 +264,12 @@ export const getInspectionAnalytics = async (req, res, next) => {
 
     let compliantCount = 0;
     let nonCompliantCount = 0;
+    let manualReviewCount = 0;
 
     verdictStats.forEach((item) => {
       if (item._id === 'Compliant') compliantCount = item.count;
       if (item._id === 'Non-Compliant') nonCompliantCount = item.count;
+      if (item._id === 'Manual Review') manualReviewCount = item.count;
     });
 
     const complianceRate =
@@ -275,6 +281,7 @@ export const getInspectionAnalytics = async (req, res, next) => {
         totalInspections: totalCount,
         compliantCount,
         nonCompliantCount,
+        manualReviewCount,
         complianceRate,
         topRegions: stateBreakdown.map((s) => ({ region: s._id, count: s.total })),
       },
@@ -291,7 +298,10 @@ export const getInspectionAnalytics = async (req, res, next) => {
  */
 export const getReportById = async (req, res, next) => {
   try {
-    const report = await Report.findById(req.params.id);
+    const isMongoId = mongoose.Types.ObjectId.isValid(req.params.id);
+    const report = isMongoId
+      ? await Report.findById(req.params.id)
+      : await Report.findOne({ docketId: req.params.id.toUpperCase() });
 
     if (!report) {
       return res.status(404).json({

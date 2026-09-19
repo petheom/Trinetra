@@ -190,8 +190,8 @@ export default function Signup() {
       return;
     }
 
-    if (trimmedPassword.length < 4) {
-      setErrorMessage('Security password / PIN must be at least 4 characters long.');
+    if (trimmedPassword.length < 6) {
+      setErrorMessage('Security password / PIN must be at least 6 characters long.');
       return;
     }
 

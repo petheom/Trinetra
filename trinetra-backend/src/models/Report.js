@@ -2,6 +2,12 @@ import mongoose from 'mongoose';
 
 const reportSchema = new mongoose.Schema(
   {
+    docketId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: () => `TRN-${Math.floor(1000 + Math.random() * 9000)}`,
+    },
     officer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -57,8 +63,8 @@ const reportSchema = new mongoose.Schema(
     verdict: {
       type: String,
       enum: {
-        values: ['Compliant', 'Non-Compliant'],
-        message: '{VALUE} is not a valid statutory verdict. Must be Compliant or Non-Compliant',
+        values: ['Compliant', 'Non-Compliant', 'Manual Review'],
+        message: '{VALUE} is not a valid statutory verdict. Must be Compliant, Non-Compliant, or Manual Review',
       },
       required: [true, 'Compliance verdict is required'],
     },
@@ -89,7 +95,8 @@ const reportSchema = new mongoose.Schema(
   }
 );
 
-// Indexes for fast lookup by state region, officer, and verdict
+// Indexes for fast lookup by docketId, state region, officer, and verdict
+reportSchema.index({ docketId: 1 });
 reportSchema.index({ region: 1, createdAt: -1 });
 reportSchema.index({ officerId: 1, createdAt: -1 });
 reportSchema.index({ verdict: 1 });

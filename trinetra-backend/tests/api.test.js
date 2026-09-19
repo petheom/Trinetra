@@ -109,13 +109,28 @@ describe('TriNetra Enterprise API Integration Tests', () => {
     jest.spyOn(Report, 'create').mockImplementation(async (reportData) => {
       const newReport = {
         _id: `66f${Math.random().toString(16).slice(2, 10)}`,
-        docketId: `TRN-${Math.floor(1000 + Math.random() * 9000)}`,
+        docketId: reportData.docketId || `TRN-${Math.floor(1000 + Math.random() * 9000)}`,
         ...reportData,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       mockReports.push(newReport);
       return newReport;
+    });
+
+    jest.spyOn(Report, 'findOne').mockImplementation((query) => {
+      const report = mockReports.find((r) => {
+        if (query.docketId) {
+          return String(r.docketId).toUpperCase() === String(query.docketId).toUpperCase();
+        }
+        return false;
+      });
+      return Promise.resolve(report || null);
+    });
+
+    jest.spyOn(Report, 'findById').mockImplementation((id) => {
+      const report = mockReports.find((r) => String(r._id) === String(id));
+      return Promise.resolve(report || null);
     });
 
     jest.spyOn(Report, 'find').mockImplementation(() => {
@@ -395,6 +410,52 @@ describe('TriNetra Enterprise API Integration Tests', () => {
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.reports)).toBe(true);
+    });
+
+    test('POST /api/inspections - Successfully records inspection with Manual Review verdict and custom docketId', async () => {
+      const manualReviewPayload = {
+        docketId: 'TRN-7788',
+        extractedText: 'Biscuits pack with blurred manufacturing stamp.',
+        verdict: 'Manual Review',
+        missingFields: [],
+        reasonsForFailure: [],
+        productName: 'Digestive Biscuits',
+        brand: 'WheatCo',
+        category: 'Food & Beverages',
+        ocrConfidence: '72%',
+        findings: 'Referred for secondary optical inspection.',
+      };
+
+      const res = await request(app)
+        .post('/api/inspections')
+        .set('Authorization', `Bearer ${officerToken}`)
+        .send(manualReviewPayload);
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.report.docketId).toBe('TRN-7788');
+      expect(res.body.report.verdict).toBe('Manual Review');
+    });
+
+    test('GET /api/inspections/:id - Fetches report by docketId without CastError', async () => {
+      mockReports.push({
+        _id: '66f123456789abcdef000010',
+        docketId: 'TRN-7788',
+        officer: mockOfficerUser._id,
+        officerId: mockOfficerUser.badgeId,
+        productName: 'Digestive Biscuits',
+        verdict: 'Manual Review',
+        region: 'Gujarat',
+      });
+
+      const res = await request(app)
+        .get('/api/inspections/TRN-7788')
+        .set('Authorization', `Bearer ${officerToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.report.docketId).toBe('TRN-7788');
+      expect(res.body.report.productName).toBe('Digestive Biscuits');
     });
   });
 

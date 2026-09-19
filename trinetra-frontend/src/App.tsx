@@ -161,8 +161,8 @@ export default function App() {
                 {/* Common dashboard accessible to both roles */}
                 <Route path="/dashboard" element={<Dashboard />} />
 
-                {/* Field Officer Only Routes */}
-                <Route element={<RoleProtectedRoute allowedRoles={['Field Officer']} />}>
+                {/* Field Operations & Packaging Inspection Routes (Accessible to Officers and Admins) */}
+                <Route element={<RoleProtectedRoute allowedRoles={['Field Officer', 'Admin']} />}>
                   <Route path="/scanner" element={<Scanner />} />
                   <Route path="/inspection" element={<Scanner />} />
                   <Route path="/verification" element={<Verification />} />

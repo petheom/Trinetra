@@ -33,7 +33,7 @@ interface StatutoryRuleItem {
 export default function Verification() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { officer, addReport } = useTriNetra();
+  const { officer, addReport, submitInspection } = useTriNetra();
 
   // State forwarded from previous scanner step if available
   const scannerState = location.state as {
@@ -99,68 +99,98 @@ export default function Verification() {
         extractedValue: '[Awaiting Image Scan from Inspector]',
         status: 'warning',
         statusLabel: 'Pending Scan',
-        explanation: 'Chronological packaging, manufacturing or batch stamp verification.',
+        explanation: 'Consumer Protection compliance timeframe declarations.',
       },
       {
-        id: 'consumer_care',
-        ruleNo: 'Rule 6(1)(a) & (g)',
-        label: 'Manufacturer Address & Consumer Helpline',
+        id: 'fssai_lic',
+        ruleNo: 'Rule 6(1)(g)',
+        label: 'FSSAI License & Manufacturer Details',
         extractedValue: '[Awaiting Image Scan from Inspector]',
         status: 'warning',
         statusLabel: 'Pending Scan',
-        explanation: 'Registered corporate identity and toll-free consumer grievance contact.',
+        explanation: '14-digit statutory food safety license registration number.',
+      },
+      {
+        id: 'cust_care',
+        ruleNo: 'Rule 6(1)(f)',
+        label: 'Consumer Helpline / Grievance Redressal',
+        extractedValue: '[Awaiting Image Scan from Inspector]',
+        status: 'warning',
+        statusLabel: 'Pending Scan',
+        explanation: 'Dedicated helpline phone or email address for grievance redressal.',
       },
     ];
   }, [analysis]);
 
+  // Detected text lines from OCR
   const rawLines = useMemo(() => {
     if (analysis?.rawText) {
       return analysis.rawText
-        .split(/\r?\n/)
+        .split('\n')
         .map((l) => l.trim())
         .filter((l) => l.length > 0);
     }
     return [];
   }, [analysis]);
 
-  const handleGenerateReport = () => {
+  const handleGenerateReport = async () => {
     if (!verdict) return;
 
-    try {
-      const productName = analysis?.detectedProductName || 'Inspected Commodity Package';
-      const brand = analysis?.detectedBrand || 'Domestic Manufacturer';
-      const category = scannerState?.category || 'Food & Beverages';
-      const confidence = analysis?.confidence ? `${Math.round(analysis.confidence)}%` : '91.5%';
+    const productName = analysis?.detectedProductName || 'Inspected Commodity Package';
+    const brand = analysis?.detectedBrand || 'Domestic Manufacturer';
+    const category = scannerState?.category || 'Food & Beverages';
+    const confidence = analysis?.confidence ? `${Math.round(analysis.confidence)}%` : '91.5%';
+    const finalVerdict = verdict === 'compliant' ? 'Compliant' : 'Non-Compliant';
+    const violations =
+      verdict === 'non-compliant'
+        ? analysis?.violations && analysis.violations.length > 0
+          ? analysis.violations
+          : ['Rule 6(1)(d) - Omission of legible Month & Year of Manufacture/Expiry']
+        : [];
+    const findings =
+      officerNotes ||
+      analysis?.summaryFindings ||
+      'Automated statutory OCR validation evaluated against Legal Metrology Rules, 2011.';
 
-      const createdReport = addReport({
+    let createdReport;
+    try {
+      // 1. Attempt submitting live inspection dossier directly to Node.js backend /api/inspections
+      createdReport = await submitInspection({
+        extractedText: analysis?.rawText || 'OCR Statutory Packaging Text Verification',
+        verdict: finalVerdict,
+        missingFields: analysis?.missingFields || [],
+        reasonsForFailure: analysis?.reasonsForFailure || [],
+        productName,
+        brand,
+        category,
+        ocrConfidence: confidence,
+        findings,
+        violations,
+        location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
+        region: officer?.region || 'Gujarat',
+        imageUrl: scannerState?.imageUrl || null,
+      });
+    } catch (apiErr) {
+      console.warn('[Verification] Backend submission failed or offline, falling back to local storage:', apiErr);
+      // 2. Graceful fallback to local persistence
+      createdReport = addReport({
         productName,
         brand,
         category,
         location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
-        verdict: verdict === 'compliant' ? 'Compliant' : 'Non-Compliant',
-        violations:
-          verdict === 'non-compliant'
-            ? analysis?.violations && analysis.violations.length > 0
-              ? analysis.violations
-              : ['Rule 6(1)(d) - Omission of legible Month & Year of Manufacture/Expiry']
-            : undefined,
-        findings:
-          officerNotes ||
-          analysis?.summaryFindings ||
-          'Automated statutory OCR validation evaluated against Legal Metrology Rules, 2011.',
+        verdict: finalVerdict,
+        violations: violations.length > 0 ? violations : undefined,
+        findings,
         ocrConfidence: confidence,
         imageUrl: scannerState?.imageUrl || null,
       });
-
-      navigate('/reports', {
-        state: {
-          newReportId: createdReport?.id,
-        },
-      });
-    } catch (err) {
-      console.error('Failed to generate report:', err);
-      navigate('/reports');
     }
+
+    navigate('/reports', {
+      state: {
+        newReportId: createdReport?.id,
+      },
+    });
   };
 
   return (
