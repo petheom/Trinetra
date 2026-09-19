@@ -6,6 +6,7 @@ import {
   getInspectionAnalytics,
   getReportById,
 } from '../controllers/inspectionController.js';
+import { getRegionalAnalytics } from '../controllers/analyticsController.js';
 import { protect, adminOnly } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -24,6 +25,7 @@ router.get('/all-reports', adminOnly, getAllReports);
 
 // 4. Analytics & Compliance Overview
 router.get('/analytics', getInspectionAnalytics);
+router.get('/analytics/regions', getRegionalAnalytics);
 
 // 5. Single Dossier by ID
 router.get('/:id', getReportById);

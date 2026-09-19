@@ -400,10 +400,10 @@ export default function AdminDashboard() {
 
               {/* Table Body */}
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredReports.map((report) => {
+                {filteredReports.map((report, rIdx) => {
                   const officerName = report.officerName || report.officer?.name || 'Field Officer';
-                  const badgeId = report.officerId || report.officer?.badgeId || 'INSP-GJ-2041';
-                  const region = report.region || report.officer?.region || 'Gujarat';
+                  const badgeId = report.officerId || report.officer?.badgeId || report.docketId || 'N/A';
+                  const region = report.region || report.officer?.region || report.location || 'General Zone';
                   const scanDate = report.createdAt
                     ? new Date(report.createdAt).toLocaleString('en-IN', {
                         day: '2-digit',
@@ -419,7 +419,7 @@ export default function AdminDashboard() {
 
                   return (
                     <tr
-                      key={report._id}
+                      key={report._id || (report as any).id || `report-${rIdx}`}
                       className="group transition-colors hover:bg-blue-50/40"
                     >
                       {/* 1. Officer Name Column */}
@@ -535,7 +535,7 @@ export default function AdminDashboard() {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-md bg-blue-100 text-blue-700 px-2 py-0.5 text-xs font-bold font-mono">
-                    {selectedReport.docketId || `TRN-${selectedReport._id.slice(-6).toUpperCase()}`}
+                    {selectedReport.docketId || `TRN-${(selectedReport._id || (selectedReport as any).id || 'REPORT').toString().slice(-6).toUpperCase()}`}
                   </span>
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
@@ -580,7 +580,13 @@ export default function AdminDashboard() {
 
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">OCR Confidence</span>
-                  <p className="mt-1 font-bold text-blue-600">{selectedReport.ocrConfidence || '98%'}</p>
+                  <p className="mt-1 font-bold text-blue-600">
+                    {selectedReport.ocrConfidence 
+                      ? (typeof selectedReport.ocrConfidence === 'string' && selectedReport.ocrConfidence.includes('%') 
+                          ? selectedReport.ocrConfidence 
+                          : `${selectedReport.ocrConfidence}%`) 
+                      : 'N/A'}
+                  </p>
                   <p className="text-[10px] text-slate-500">Tesseract Engine</p>
                 </div>
               </div>

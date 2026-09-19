@@ -18,12 +18,9 @@ import {
 import { useTriNetra, type UserRole } from '../context/TriNetraContext';
 import { authAPI } from '../utils/api';
 import { INDIAN_STATES, type IndianStateType } from '../constants/indianStates';
-import type { RegisteredOfficer } from '../constants/seedUsers';
-
 // Export REGIONS for backward compatibility across existing views
 export const REGIONS = INDIAN_STATES;
 export type RegionType = IndianStateType;
-export type { RegisteredOfficer };
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -143,9 +140,6 @@ export default function Signup() {
 
       setErrorMessage(serverMessage);
       showToast(serverMessage, 'error');
-
-      // Explicit alert dialog to guarantee immediate user visibility
-      alert(apiErr?.response?.data?.message || apiErr?.data?.message || apiErr?.message || 'Registration failed');
 
       setIsLoading(false);
       isSubmittingRef.current = false;

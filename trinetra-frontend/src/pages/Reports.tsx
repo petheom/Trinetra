@@ -21,7 +21,7 @@ import { generateSavedReportPdf } from '../utils/generatePdfReport';
 
 export default function Reports() {
   const location = useLocation();
-  const { officer, reports, isLoadingReports, fetchReports } = useTriNetra();
+  const { officer, reports, isLoadingReports, fetchReports, showToast } = useTriNetra();
 
   // Automatically fetch latest live reports from backend on page view
   useEffect(() => {
@@ -85,11 +85,13 @@ export default function Reports() {
         try {
           const res = generateSavedReportPdf(targetReport);
           if (!res.success) {
-            alert(`Failed to generate PDF: ${res.error || 'Unknown error'}`);
+            showToast(`Failed to generate PDF: ${res.error || 'Unknown error'}`, 'error');
+          } else {
+            showToast(`PDF for Dossier #${reportId} exported successfully`, 'success');
           }
         } catch (e) {
           console.error('PDF generation error:', e);
-          alert('Failed to generate PDF report.');
+          showToast('Failed to generate PDF report.', 'error');
         }
       }
     }, 400);
@@ -229,21 +231,29 @@ export default function Reports() {
 
       {/* 3. Reports List / Cards */}
       <div className="space-y-4">
-        {filteredReports.length === 0 ? (
+        {isLoadingReports ? (
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white py-16 px-4 text-center shadow-xs">
+            <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mb-3" />
+            <h4 className="text-sm font-bold text-slate-900">Loading Inspection Dossiers...</h4>
+            <p className="text-xs text-slate-400 mt-1">Retrieving live records from MongoDB database</p>
+          </div>
+        ) : filteredReports.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-white py-12 px-4 text-center">
             <FileText className="h-10 w-10 text-gray-400 mb-2" />
             <h3 className="text-sm font-semibold text-gray-900">No matching reports found</h3>
             <p className="mt-1 text-xs text-gray-500">
-              Try adjusting your search query or status filter parameters.
+              {accessibleReports.length === 0
+                ? 'No inspection reports have been recorded in the database yet.'
+                : 'Try adjusting your search query or status filter parameters.'}
             </p>
           </div>
         ) : (
-          filteredReports.map((report: InspectionReport) => {
+          filteredReports.map((report: InspectionReport, idx: number) => {
             const isExpanded = expandedReportId === report.id;
 
             return (
               <div
-                key={report.id}
+                key={report.id || (report as any)._id || `report-${idx}`}
                 className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-sm transition-all duration-300 hover:shadow-xl hover:shadow-slate-900/5 hover:border-blue-300 hover:-translate-y-0.5"
               >
                 {/* Main Card Header / Summary Row */}

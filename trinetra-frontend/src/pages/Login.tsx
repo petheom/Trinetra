@@ -121,66 +121,13 @@ export default function Login({ initialMode }: LoginProps = {}) {
       throw new Error(response?.message || 'Authentication failed');
     } catch (apiErr: any) {
       console.warn('[Login] API login attempt failed or offline:', apiErr);
-      const apiMessage = apiErr?.message || 'Unable to connect to authentication server.';
+      const apiMessage =
+        apiErr?.response?.data?.message ||
+        apiErr?.data?.message ||
+        apiErr?.message ||
+        'Authentication failed. Please verify your credentials and ensure backend server is online.';
 
-      // If backend returned explicit 400 or 401 client error (e.g. wrong password or badge not found)
-      if (apiErr.status === 400 || apiErr.status === 401) {
-        setErrorMessage(apiMessage);
-        showToast(apiMessage, 'error');
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. Failsafe Offline / Developer Fallback for Testing when server is booting
-      const normalizedInput = trimmedUsername.toLowerCase();
-
-      if (
-        (normalizedInput === 'admin' || normalizedInput === 'admin@trinetra.gov.in') &&
-        trimmedPassword === 'admin123'
-      ) {
-        const fallbackAdmin = {
-          badgeId: 'ADMIN-HQ-01',
-          name: 'Director Amit Trivedi',
-          role: 'Admin' as const,
-          region: 'Delhi (NCT)',
-          loginTime: new Date().toISOString(),
-        };
-        login(
-          fallbackAdmin.badgeId,
-          fallbackAdmin.name,
-          fallbackAdmin.region,
-          fallbackAdmin.role
-        );
-        showToast('Running in offline developer mode (Server bootstrapping)', 'warning');
-        setIsLoading(false);
-        navigate('/dashboard', { replace: true });
-        return;
-      }
-
-      if (
-        (normalizedInput === 'officer' || normalizedInput === 'officer@trinetra.gov.in') &&
-        (trimmedPassword === 'GovPass#2026' || trimmedPassword === 'officer123')
-      ) {
-        const fallbackOfficer = {
-          badgeId: 'INSP-GJ-2041',
-          name: 'Inspector Rajesh Varma',
-          role: 'Field Officer' as const,
-          region: 'Gujarat',
-          loginTime: new Date().toISOString(),
-        };
-        login(
-          fallbackOfficer.badgeId,
-          fallbackOfficer.name,
-          fallbackOfficer.region,
-          fallbackOfficer.role
-        );
-        showToast('Running in offline developer mode (Server bootstrapping)', 'warning');
-        setIsLoading(false);
-        navigate('/dashboard', { replace: true });
-        return;
-      }
-
-      setErrorMessage(`${apiMessage} (Check that Node.js backend is running on port 5000)`);
+      setErrorMessage(apiMessage);
       showToast(apiMessage, 'error');
       setIsLoading(false);
     }
