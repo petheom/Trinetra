@@ -55,12 +55,55 @@ export default function Reports() {
 
   const handleDownloadPdf = (reportId: string) => {
     setDownloadingId(reportId);
+    const targetReport = reports.find((r) => r.id === reportId);
+
     setTimeout(() => {
       setDownloadingId(null);
-      alert(
-        `Legal Metrology Evidence Dossier [${reportId}.pdf] generated and downloaded successfully!`
-      );
-    }, 1000);
+      if (targetReport) {
+        const content = [
+          '===================================================================',
+          'GOVERNMENT OF INDIA - MINISTRY OF CONSUMER AFFAIRS',
+          'DEPARTMENT OF LEGAL METROLOGY - EVIDENTIARY AUDIT DOSSIER',
+          '===================================================================',
+          `DOSSIER ID:               ${targetReport.id}`,
+          `INSPECTION TIMESTAMP:     ${targetReport.inspectionDate}`,
+          `INSPECTING OFFICER:       ${targetReport.officerName} (${targetReport.officerId})`,
+          `ENFORCEMENT LOCATION:     ${targetReport.location}`,
+          '',
+          'COMMODITY SPECIFICATIONS:',
+          `- Product Description:    ${targetReport.productName}`,
+          `- Manufacturer / Brand:   ${targetReport.brand}`,
+          `- Packaged Category:      ${targetReport.category}`,
+          '',
+          `STATUTORY AUDIT VERDICT:  ${targetReport.verdict.toUpperCase()}`,
+          `OCR CONFIDENCE LEVEL:     ${targetReport.ocrConfidence}`,
+          '',
+          'STATUTORY FINDINGS & AUDIT NOTES:',
+          targetReport.findings,
+          '',
+          ...(targetReport.violations && targetReport.violations.length > 0
+            ? [
+                'STATUTORY INFRACTIONS FLAGGED UNDER LEGAL METROLOGY ACT, 2009:',
+                ...targetReport.violations.map((v) => `  * ${v}`),
+              ]
+            : ['DECLARATION COMPLIANCE: Fully compliant with statutory standards.']),
+          '',
+          '===================================================================',
+          'DIGITALLY AUTHENTICATED VIA TRINETRA OCR COMPLIANCE ENGINE',
+          '===================================================================',
+        ].join('\n');
+
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `TriNetra-Legal-Dossier-${reportId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    }, 600);
   };
 
   const handlePrint = () => {
@@ -68,7 +111,7 @@ export default function Reports() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 pb-6">
+    <div className="w-full space-y-6 pb-6">
       {/* 1. Top Header */}
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>

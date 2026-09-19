@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Shield,
@@ -12,6 +12,7 @@ import {
   UserPlus,
   LogIn,
   TriangleAlert,
+  BadgeCheck,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
 
@@ -50,6 +51,21 @@ export default function Login({ initialMode }: LoginProps = {}) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState<string>(() => {
+    return (location.state as { message?: string } | null)?.message || '';
+  });
+
+  // Pick up enrolled credentials from signup redirection state
+  useEffect(() => {
+    const stateObj = location.state as { registeredBadge?: string; message?: string } | null;
+    if (stateObj?.registeredBadge) {
+      setOfficerId(stateObj.registeredBadge);
+      setIsRegisterMode(false);
+    }
+    if (stateObj?.message) {
+      setSuccessMessage(stateObj.message);
+    }
+  }, [location.state]);
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -114,6 +130,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
   const handleToggleMode = (register: boolean) => {
     setIsRegisterMode(register);
     setErrorMessage('');
+    setSuccessMessage('');
     setOfficerName('');
     setOfficerId('');
     setPassword('');
@@ -124,6 +141,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
   const handleGoogleLogin = () => {
     setIsGoogleLoading(true);
     setErrorMessage('');
+    setSuccessMessage('');
 
     setTimeout(() => {
       // Simulate authenticating via Google Workspace SSO
@@ -136,13 +154,14 @@ export default function Login({ initialMode }: LoginProps = {}) {
 
       login(googleOfficer.badgeId, googleOfficer.name, 'National HQ');
       setIsGoogleLoading(false);
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     }, 600);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setSuccessMessage('');
 
     const trimmedId = officerId.trim().toUpperCase();
     const trimmedPassword = password.trim();
@@ -184,10 +203,14 @@ export default function Login({ initialMode }: LoginProps = {}) {
         };
         saveRegisteredAccount(newOfficer);
 
-        login(trimmedId, trimmedName, 'Enforcement Directorate');
         setIsLoading(false);
-        navigate('/dashboard');
-      }, 500);
+        setIsRegisterMode(false);
+        setPassword('');
+        setConfirmPassword('');
+        setSuccessMessage(
+          `Credentials enrolled for ${trimmedName} (${trimmedId})! Please sign in with your password.`
+        );
+      }, 400);
     } else {
       if (!trimmedId) {
         setErrorMessage('Please enter your officer badge ID.');
@@ -208,7 +231,7 @@ export default function Login({ initialMode }: LoginProps = {}) {
 
         if (!matched) {
           setErrorMessage(
-            `Badge ID "${trimmedId}" is not registered in the system. Switch to "New Officer Registration" tab to create your credentials.`
+            `Badge ID "${trimmedId}" is not registered in the system. Switch to "New Registration" to enroll.`
           );
           setIsLoading(false);
           return;
@@ -223,8 +246,8 @@ export default function Login({ initialMode }: LoginProps = {}) {
         // Live session authenticated
         login(matched.badgeId, matched.name, 'Enforcement Directorate');
         setIsLoading(false);
-        navigate('/dashboard');
-      }, 500);
+        navigate('/dashboard', { replace: true });
+      }, 400);
     }
   };
 
@@ -334,9 +357,17 @@ export default function Login({ initialMode }: LoginProps = {}) {
             </div>
           </div>
 
+          {/* Success Message Alert */}
+          {successMessage && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 animate-in fade-in">
+              <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+              <span>{successMessage}</span>
+            </div>
+          )}
+
           {/* Error Message Alert */}
           {errorMessage && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 animate-in fade-in">
               <TriangleAlert className="h-4 w-4 shrink-0 text-rose-600" />
               <span>{errorMessage}</span>
             </div>

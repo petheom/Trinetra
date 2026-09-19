@@ -81,7 +81,7 @@ export default function Dashboard() {
       : reports.filter((log) => log.category === filterCategory);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 pb-6">
+    <div className="w-full space-y-8 pb-6">
       {/* 1. Top Header with Dynamic Officer Greeting */}
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>

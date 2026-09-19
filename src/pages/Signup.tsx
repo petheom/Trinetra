@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Shield,
@@ -153,7 +153,7 @@ export default function Signup() {
   };
 
   // Main Form Submission Handler
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -212,7 +212,7 @@ export default function Signup() {
     setIsLoading(true);
     isSubmittingRef.current = true;
 
-    // 3. Persist and Navigate Safely
+    // 3. Persist and Navigate to Login Safely
     setTimeout(() => {
       try {
         const newOfficer: RegisteredOfficer = {
@@ -230,30 +230,26 @@ export default function Signup() {
           return;
         }
 
-        setSuccessMessage(`Officer profile for ${trimmedName} successfully enrolled! Initializing terminal...`);
+        setSuccessMessage(`Officer profile for ${trimmedName} (${trimmedId}) enrolled successfully! Redirecting to login...`);
 
-        // Initialize session in Context
-        try {
-          login(trimmedId, trimmedName, trimmedRegion || 'Central Enforcement Grid');
-        } catch (ctxErr) {
-          console.warn('TriNetraContext login error:', ctxErr);
-        }
-
-        // Safe Navigation to Dashboard with replacement to avoid broken back-button states
+        // Navigate cleanly to Login with state
         setTimeout(() => {
           setIsLoading(false);
-          navigate('/dashboard', {
+          navigate('/login', {
             replace: true,
-            state: { registeredBadge: trimmedId, officerName: trimmedName },
+            state: {
+              registeredBadge: trimmedId,
+              message: `Credentials enrolled for ${trimmedName} (${trimmedId})! Please enter your password to sign in.`,
+            },
           });
-        }, 400);
+        }, 500);
       } catch (err) {
         console.error('Unhandled registration error:', err);
         setErrorMessage('An unexpected error occurred while finalizing enrollment. Please try again.');
         setIsLoading(false);
         isSubmittingRef.current = false;
       }
-    }, 500);
+    }, 400);
   };
 
   return (

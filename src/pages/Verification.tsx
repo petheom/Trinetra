@@ -120,7 +120,7 @@ export default function Verification() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 pb-6">
+    <div className="w-full space-y-6 pb-6">
       {/* 1. Page Header */}
       <div className="flex flex-col gap-3 border-b border-gray-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>

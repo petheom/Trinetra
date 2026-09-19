@@ -1,13 +1,9 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Eye } from 'lucide-react';
 import { TriNetraProvider, useTriNetra } from './context/TriNetraContext';
 
-import Navbar from './components/Navbar';
-import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
-import Landing from './pages/Landing';
-import About from './pages/About';
-import Contact from './pages/Contact';
+import AdminLayout from './layouts/AdminLayout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
@@ -15,116 +11,80 @@ import Scanner from './pages/Scanner';
 import Verification from './pages/Verification';
 import Reports from './pages/Reports';
 
-// Protected Route Guard with Dedicated Officer Workspace Wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+// 1. Clean Enterprise Auth Layout: displays clean TriNetra logo & brand with ZERO public navbar links
+function AuthLayout() {
+  return (
+    <div className="min-h-screen flex flex-col justify-between bg-slate-900 text-slate-100 font-sans selection:bg-blue-600 selection:text-white">
+      {/* Subtle National Tricolor Accent Bar */}
+      <div className="h-1 w-full shrink-0 bg-gradient-to-r from-[#FF9933] via-white to-[#138808]" />
+
+      {/* Clean Brand Header: TriNetra Logo Only, Zero public navbar links */}
+      <header className="px-6 py-4 flex items-center justify-between border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/25 ring-1 ring-white/20">
+            <Eye className="h-5 w-5" />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="font-black text-xl tracking-tight text-white leading-none">
+                Tri<span className="text-blue-400">Netra</span>
+              </span>
+              <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-blue-300 ring-1 ring-blue-400/30">
+                Enterprise
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-medium tracking-wide">
+              Legal Metrology Division • Govt of India
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-full border border-slate-700/80 bg-slate-800/60 px-3 py-1 text-xs text-slate-300">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          <span className="hidden sm:inline font-medium text-slate-300">Enforcement Gateway Active</span>
+        </div>
+      </header>
+
+      {/* Centered Authentication Viewport */}
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8">
+        <div className="w-full animate-fade-in">
+          <Outlet />
+        </div>
+      </main>
+
+      {/* Clean Minimalist Security Notice */}
+      <footer className="py-4 text-center text-xs text-slate-500 border-t border-slate-800/60">
+        © 2026 Legal Metrology Division • Standard Weights & Measures Regulatory Grid
+      </footer>
+    </div>
+  );
+}
+
+// 2. Protected Route Layout: wraps authenticated officer routes strictly inside AdminLayout
+function ProtectedLayout() {
   const { officer } = useTriNetra();
 
-  // Safe check against state and localStorage to prevent false redirects
+  // Validate active officer state and fallback safely to persisted session
   if (!officer) {
     try {
       const saved = localStorage.getItem('trinetra_officer');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.badgeId) {
-          return <div className="w-full animate-in fade-in duration-200">{children}</div>;
+          return <AdminLayout />;
         }
       }
     } catch (e) {
-      console.warn('Error reading stored officer session:', e);
+      console.warn('Error verifying officer session:', e);
     }
 
     return <Navigate to="/login" replace />;
   }
 
-  return (
-    <div className="w-full animate-in fade-in duration-200">
-      {children}
-    </div>
-  );
-}
-
-// Shell layout managing sticky navbar, viewports, and conditional footer
-function AppShell() {
-  const location = useLocation();
-
-  // Determine if active page is an internal working workspace
-  const isWorkingPage = ['/dashboard', '/scanner', '/verification', '/reports'].some((path) =>
-    location.pathname.startsWith(path)
-  );
-
-  return (
-    <div
-      className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
-        isWorkingPage ? 'bg-slate-50 text-slate-900' : 'bg-gray-50 text-gray-900'
-      }`}
-    >
-      {/* Sticky Universal Navigation Bar */}
-      <Navbar />
-
-      {/* Main Page Content Viewport */}
-      <main
-        className={`mx-auto w-full flex-1 ${
-          isWorkingPage
-            ? 'max-w-7xl px-4 py-6 sm:px-6 lg:px-8'
-            : 'max-w-7xl p-4 sm:p-6 lg:p-8'
-        }`}
-      >
-        <Routes>
-          {/* Public Portal Pages & Aliases */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/about-us" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/contact-us" element={<Contact />} />
-
-          {/* Authentication Routes & Aliases */}
-          <Route path="/login" element={<Login initialMode="login" />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/register" element={<Signup />} />
-
-          {/* Protected Officer Workflow Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/scanner"
-            element={
-              <ProtectedRoute>
-                <Scanner />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/verification"
-            element={
-              <ProtectedRoute>
-                <Verification />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/reports"
-            element={
-              <ProtectedRoute>
-                <Reports />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Catch-all redirect */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-
-      {/* Render Public Government Footer ONLY on public portal pages (completely hidden on working officer views) */}
-      {!isWorkingPage && <Footer />}
-    </div>
-  );
+  return <AdminLayout />;
 }
 
 export default function App() {
@@ -133,7 +93,29 @@ export default function App() {
       <TriNetraProvider>
         <BrowserRouter>
           <ErrorBoundary>
-            <AppShell />
+            <Routes>
+              {/* Direct to Auth: Root path automatically redirects to /login */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+
+              {/* Clean Auth Routes (TriNetra logo & form only, zero public navbar links) */}
+              <Route element={<AuthLayout />}>
+                <Route path="/login" element={<Login initialMode="login" />} />
+                <Route path="/signup" element={<Signup />} />
+                <Route path="/register" element={<Signup />} />
+              </Route>
+
+              {/* Protected Officer Workspace Routes (Sidebar + minimal Topbar via AdminLayout) */}
+              <Route element={<ProtectedLayout />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/inspection" element={<Scanner />} />
+                <Route path="/scanner" element={<Scanner />} />
+                <Route path="/verification" element={<Verification />} />
+                <Route path="/reports" element={<Reports />} />
+              </Route>
+
+              {/* Catch-all redirect to /login */}
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
           </ErrorBoundary>
         </BrowserRouter>
       </TriNetraProvider>
