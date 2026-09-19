@@ -1,32 +1,42 @@
-# React + TypeScript + Vite
+# TriNetra (त्रिनेत्र) - Smart Packaging & Compliance Verification Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+TriNetra is an AI-powered compliance inspection platform designed to automate Legal Metrology rules validation for packaged commodities in India.
 
-Currently, two official plugins are available:
+## Repository Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+TriNetra/
+├── trinetra-backend/   # Node.js + Express + MongoDB REST API
+└── trinetra-frontend/  # React + TypeScript + Vite + Tailwind CSS Web Application
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+---
+
+## 🚀 Quick Start
+
+### 1. Backend Setup
+
+```bash
+cd trinetra-backend
+npm install
+# Copy .env.example to .env and configure your variables
+npm run dev
+```
+
+### 2. Frontend Setup
+
+```bash
+cd trinetra-frontend
+npm install
+npm run dev
+```
+
+The frontend client runs on `http://localhost:5173` and connects to the backend API running on `http://localhost:5000`.
+
+---
+
+## 🛠 Tech Stack
+
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Lucide Icons, jsPDF
+- **Backend**: Node.js, Express.js, MongoDB / Mongoose, JWT Authentication, bcryptjs
+- **Testing**: Playwright (E2E), Jest (API unit tests)
