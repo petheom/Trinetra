@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Phone,
   Mail,
   MapPin,
   Send,
   CircleCheck,
-  LifeBuoy,
   Award,
+  AlertCircle,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
 

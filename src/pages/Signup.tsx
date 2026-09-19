@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useRef, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Shield,
@@ -13,25 +13,27 @@ import {
   TriangleAlert,
   LogIn,
   MapPin,
+  Briefcase,
 } from 'lucide-react';
-import { useTriNetra } from '../context/TriNetraContext';
+import { useTriNetra, type UserRole } from '../context/TriNetraContext';
+import { INDIAN_STATES, type IndianStateType } from '../constants/indianStates';
+import { DEFAULT_USERS, type RegisteredOfficer } from '../constants/seedUsers';
 
-interface RegisteredOfficer {
-  badgeId: string;
-  name: string;
-  passwordHash: string;
-  region?: string;
-}
+// Export REGIONS for backward compatibility across existing views
+export const REGIONS = INDIAN_STATES;
+export type RegionType = IndianStateType;
+export type { RegisteredOfficer };
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { officer, login } = useTriNetra();
+  const { login } = useTriNetra();
   const isSubmittingRef = useRef(false);
 
   // Form input fields
   const [officerName, setOfficerName] = useState('');
   const [officerId, setOfficerId] = useState('');
-  const [region, setRegion] = useState('Central Enforcement Grid');
+  const [role, setRole] = useState<UserRole>('Field Officer');
+  const [region, setRegion] = useState<string>('Gujarat');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -42,64 +44,55 @@ export default function Signup() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
-  // Auto-redirect if officer is already authenticated and this wasn't triggered by fresh signup
-  useEffect(() => {
-    if (officer && !isSubmittingRef.current) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [officer, navigate]);
 
-  // Safe helper to read registered officers from localStorage
+
+  // Safe helper to read registered officers from localStorage ('users' array)
   const getRegisteredAccounts = (): RegisteredOfficer[] => {
     try {
-      const stored = localStorage.getItem('trinetra_registered_officers');
-      if (stored) {
-        const parsed = JSON.parse(stored);
+      const storedUsers = localStorage.getItem('users');
+      if (storedUsers) {
+        const parsed = JSON.parse(storedUsers);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+      const storedLegacy = localStorage.getItem('trinetra_registered_officers');
+      if (storedLegacy) {
+        const parsed = JSON.parse(storedLegacy);
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }
     } catch (e) {
-      console.error('Failed to parse registered officers from localStorage:', e);
+      console.error('Failed to parse registered users from localStorage:', e);
     }
-    // Default seed officers if none found
-    return [
-      {
-        badgeId: 'INSP-GJ-2041',
-        name: 'Inspector Rajesh Varma',
-        passwordHash: 'GovPass#2026',
-        region: 'Gujarat Directorate',
-      },
-      {
-        badgeId: 'INSP-DL-402',
-        name: 'Inspector Sunita Sharma',
-        passwordHash: 'GovPass#2026',
-        region: 'Delhi Zone',
-      },
-      {
-        badgeId: 'DEMO-OFFICER',
-        name: 'Field Officer Demo',
-        passwordHash: 'admin123',
-        region: 'Central Directorate',
-      },
-    ];
+    // Seed default users if none found
+    try {
+      localStorage.setItem('users', JSON.stringify(DEFAULT_USERS));
+      localStorage.setItem('trinetra_registered_officers', JSON.stringify(DEFAULT_USERS));
+    } catch {}
+    return DEFAULT_USERS;
   };
 
   // Safe helper to persist account into localStorage with try-catch quota guard
-  const persistOfficerAccount = (newOfficer: RegisteredOfficer): { success: boolean; error?: string } => {
+  const persistOfficerAccount = (
+    newOfficer: RegisteredOfficer
+  ): { success: boolean; error?: string } => {
     try {
       const current = getRegisteredAccounts();
       const updated = [
-        ...current.filter((o) => o.badgeId.toUpperCase() !== newOfficer.badgeId.toUpperCase()),
+        ...current.filter((o) => String(o?.badgeId || '').toUpperCase() !== String(newOfficer.badgeId || '').toUpperCase()),
         newOfficer,
       ];
+      localStorage.setItem('users', JSON.stringify(updated));
       localStorage.setItem('trinetra_registered_officers', JSON.stringify(updated));
       return { success: true };
     } catch (e) {
       console.error('LocalStorage write failure:', e);
       return {
         success: false,
-        error: 'Unable to write to local storage. Your browser storage quota may be exceeded or private browsing restrictions may be enabled.',
+        error:
+          'Unable to write to local storage. Your browser storage quota may be exceeded or private browsing restrictions may be enabled.',
       };
     }
   };
@@ -117,7 +110,8 @@ export default function Signup() {
           badgeId: 'GOOG-8821',
           name: 'Google Verified Officer',
           passwordHash: 'google_sso_token',
-          region: 'National HQ',
+          role: role,
+          region: region || 'Gujarat',
         };
 
         const result = persistOfficerAccount(googleOfficer);
@@ -129,12 +123,12 @@ export default function Signup() {
         }
 
         try {
-          login(googleOfficer.badgeId, googleOfficer.name, googleOfficer.region || 'National HQ');
+          login(googleOfficer.badgeId, googleOfficer.name, googleOfficer.region, googleOfficer.role);
         } catch (ctxErr) {
           console.warn('Context login warning:', ctxErr);
         }
 
-        setSuccessMessage('SSO Authentication verified! Launching officer terminal...');
+        setSuccessMessage('SSO Authentication verified! Launching terminal...');
         setIsGoogleLoading(false);
 
         setTimeout(() => {
@@ -171,12 +165,22 @@ export default function Signup() {
     }
 
     if (!trimmedId) {
-      setErrorMessage('Please provide an Officer Badge ID (e.g., INSP-DL-502).');
+      setErrorMessage('Please provide an Officer / Admin Badge ID (e.g., INSP-GJ-2041 or ADMIN-HQ-01).');
       return;
     }
 
     if (trimmedId.length < 3) {
       setErrorMessage('Badge ID must be at least 3 characters long.');
+      return;
+    }
+
+    if (!role) {
+      setErrorMessage('Please select an authorized role (Admin or Field Officer).');
+      return;
+    }
+
+    if (!trimmedRegion) {
+      setErrorMessage('Please select an authorized operating State or Union Territory.');
       return;
     }
 
@@ -198,10 +202,10 @@ export default function Signup() {
     // 2. Duplicate Badge ID Verification
     try {
       const existingOfficers = getRegisteredAccounts();
-      const duplicate = existingOfficers.find((o) => o.badgeId.toUpperCase() === trimmedId);
+      const duplicate = existingOfficers.find((o) => String(o?.badgeId || '').toUpperCase() === trimmedId);
       if (duplicate) {
         setErrorMessage(
-          `Badge ID "${trimmedId}" is already enrolled in the National Metrology Enforcement Grid. Please log in directly or specify a unique ID.`
+          `Badge ID "${trimmedId}" is already enrolled in the Pan-India Metrology Grid. Please log in directly or specify a unique ID.`
         );
         return;
       }
@@ -219,7 +223,8 @@ export default function Signup() {
           badgeId: trimmedId,
           name: trimmedName,
           passwordHash: trimmedPassword,
-          region: trimmedRegion || 'Central Enforcement Grid',
+          role: role,
+          region: trimmedRegion,
         };
 
         const result = persistOfficerAccount(newOfficer);
@@ -230,7 +235,9 @@ export default function Signup() {
           return;
         }
 
-        setSuccessMessage(`Officer profile for ${trimmedName} (${trimmedId}) enrolled successfully! Redirecting to login...`);
+        setSuccessMessage(
+          `National profile for ${trimmedName} (${trimmedId} • ${role} • ${trimmedRegion}) enrolled successfully! Redirecting to login...`
+        );
 
         // Navigate cleanly to Login with state
         setTimeout(() => {
@@ -239,7 +246,7 @@ export default function Signup() {
             replace: true,
             state: {
               registeredBadge: trimmedId,
-              message: `Credentials enrolled for ${trimmedName} (${trimmedId})! Please enter your password to sign in.`,
+              message: `Credentials enrolled for ${trimmedName} (${trimmedId}) as ${role} [${trimmedRegion}]! Please sign in.`,
             },
           });
         }, 500);
@@ -265,17 +272,17 @@ export default function Signup() {
 
             <div className="pt-2 inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3.5 py-1 text-xs font-bold text-blue-700">
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Legal Metrology Division</span>
+              <span>Legal Metrology Division • Govt of India</span>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
               Tri<span className="text-blue-600">Netra</span>
             </h1>
             <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Officer Registration & Credential Enrollment
+              Pan-India User Registration & Jurisdictional Enrollment
             </p>
             <p className="text-xs text-slate-400">
-              Create an authorized credentials docket for statutory field audits
+              Authorized State & UT regulatory portal for statutory weights and packaging audits
             </p>
           </div>
 
@@ -286,7 +293,7 @@ export default function Signup() {
               className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-white/60 transition-all"
             >
               <LogIn className="h-3.5 w-3.5 text-slate-500" />
-              <span>Officer Login</span>
+              <span>User Login</span>
             </Link>
             <div className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-white py-2 text-xs font-bold text-blue-600 shadow-xs border border-slate-200/80">
               <UserPlus className="h-3.5 w-3.5 text-blue-600" />
@@ -330,7 +337,7 @@ export default function Signup() {
                     setOfficerName(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g., Inspector Amit Verma"
+                  placeholder="e.g., Rajesh Varma"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-4 text-xs font-semibold text-slate-900 shadow-xs transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
                 />
               </div>
@@ -339,7 +346,7 @@ export default function Signup() {
             {/* Badge ID */}
             <div>
               <label htmlFor="signup-badge" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                New Officer Badge ID <span className="text-rose-500">*</span>
+                Badge / Employee ID <span className="text-rose-500">*</span>
               </label>
               <div className="relative mt-1.5">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
@@ -354,33 +361,60 @@ export default function Signup() {
                     setOfficerId(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g., INSP-DL-501"
+                  placeholder="e.g., INSP-GJ-2041 or ADMIN-HQ-01"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-4 text-xs font-semibold uppercase text-slate-900 shadow-xs transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
                 />
               </div>
             </div>
 
-            {/* Jurisdiction / Region */}
-            <div>
-              <label htmlFor="signup-region" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                Jurisdiction / Directorate
-              </label>
-              <div className="relative mt-1.5">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
-                  <MapPin className="h-4 w-4" />
+            {/* Role & Pan-India State / UT Dropdown Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* Role Dropdown */}
+              <div>
+                <label htmlFor="signup-role" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Role <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative mt-1.5">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <Briefcase className="h-4 w-4" />
+                  </div>
+                  <select
+                    id="signup-role"
+                    required
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as UserRole)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-9 pr-3 text-xs font-semibold text-slate-900 shadow-xs transition hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+                  >
+                    <option value="Field Officer">Field Officer</option>
+                    <option value="Admin">Admin</option>
+                  </select>
                 </div>
-                <select
-                  id="signup-region"
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-10 pr-4 text-xs font-semibold text-slate-900 shadow-xs transition hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
-                >
-                  <option value="Central Enforcement Grid">Central Enforcement Grid (HQ)</option>
-                  <option value="Northern Region (Delhi / NCR)">Northern Region (Delhi / NCR)</option>
-                  <option value="Western Region (Mumbai / Gujarat)">Western Region (Mumbai / Gujarat)</option>
-                  <option value="Southern Region (Bengaluru / Chennai)">Southern Region (Bengaluru / Chennai)</option>
-                  <option value="Eastern Region (Kolkata Zone)">Eastern Region (Kolkata Zone)</option>
-                </select>
+              </div>
+
+              {/* Pan-India State / UT Dropdown (28 States + 8 UTs Alphabetized) */}
+              <div>
+                <label htmlFor="signup-region" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                  State / UT <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative mt-1.5">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <select
+                    id="signup-region"
+                    required
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pl-9 pr-3 text-xs font-semibold text-slate-900 shadow-xs transition hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+                  >
+                    <option value="" disabled>Select State / Union Territory</option>
+                    {INDIAN_STATES.map((stateName) => (
+                      <option key={stateName} value={stateName}>
+                        {stateName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -450,11 +484,11 @@ export default function Signup() {
               {isLoading ? (
                 <>
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  <span>Enrolling Profile...</span>
+                  <span>Enrolling Pan-India Profile...</span>
                 </>
               ) : (
                 <>
-                  <span>Enroll Badge & Launch Terminal</span>
+                  <span>Enroll Profile & Continue</span>
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </>
               )}
@@ -513,7 +547,7 @@ export default function Signup() {
           {/* Footer Note */}
           <div className="mt-6 border-t border-slate-100 pt-4 text-center">
             <p className="text-xs text-slate-500">
-              Already have an enrolled Badge ID?{' '}
+              Already have an enrolled account?{' '}
               <Link to="/login" className="font-bold text-blue-600 hover:text-blue-700 underline">
                 Sign In here
               </Link>

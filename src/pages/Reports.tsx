@@ -16,6 +16,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useTriNetra, type InspectionReport } from '../context/TriNetraContext';
+import { generateSavedReportPdf } from '../utils/generatePdfReport';
 
 export default function Reports() {
   const location = useLocation();
@@ -34,11 +35,13 @@ export default function Reports() {
 
   // Search and filter logic over dynamic reports
   const filteredReports = reports.filter((report) => {
+    const q = String(searchQuery || '').toLowerCase().trim();
     const matchesSearch =
-      report.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.officerName.toLowerCase().includes(searchQuery.toLowerCase());
+      !q ||
+      String(report?.productName || '').toLowerCase().includes(q) ||
+      String(report?.brand || '').toLowerCase().includes(q) ||
+      String(report?.id || '').toLowerCase().includes(q) ||
+      String(report?.officerName || '').toLowerCase().includes(q);
 
     const matchesStatus =
       statusFilter === 'All' || report.verdict === statusFilter;
@@ -47,7 +50,7 @@ export default function Reports() {
       dateFilter === 'All'
         ? true
         : dateFilter === 'Today'
-        ? report.inspectionDate.toLowerCase().includes('today')
+        ? String(report?.inspectionDate || '').toLowerCase().includes('today')
         : true;
 
     return matchesSearch && matchesStatus && matchesDate;
@@ -60,50 +63,17 @@ export default function Reports() {
     setTimeout(() => {
       setDownloadingId(null);
       if (targetReport) {
-        const content = [
-          '===================================================================',
-          'GOVERNMENT OF INDIA - MINISTRY OF CONSUMER AFFAIRS',
-          'DEPARTMENT OF LEGAL METROLOGY - EVIDENTIARY AUDIT DOSSIER',
-          '===================================================================',
-          `DOSSIER ID:               ${targetReport.id}`,
-          `INSPECTION TIMESTAMP:     ${targetReport.inspectionDate}`,
-          `INSPECTING OFFICER:       ${targetReport.officerName} (${targetReport.officerId})`,
-          `ENFORCEMENT LOCATION:     ${targetReport.location}`,
-          '',
-          'COMMODITY SPECIFICATIONS:',
-          `- Product Description:    ${targetReport.productName}`,
-          `- Manufacturer / Brand:   ${targetReport.brand}`,
-          `- Packaged Category:      ${targetReport.category}`,
-          '',
-          `STATUTORY AUDIT VERDICT:  ${targetReport.verdict.toUpperCase()}`,
-          `OCR CONFIDENCE LEVEL:     ${targetReport.ocrConfidence}`,
-          '',
-          'STATUTORY FINDINGS & AUDIT NOTES:',
-          targetReport.findings,
-          '',
-          ...(targetReport.violations && targetReport.violations.length > 0
-            ? [
-                'STATUTORY INFRACTIONS FLAGGED UNDER LEGAL METROLOGY ACT, 2009:',
-                ...targetReport.violations.map((v) => `  * ${v}`),
-              ]
-            : ['DECLARATION COMPLIANCE: Fully compliant with statutory standards.']),
-          '',
-          '===================================================================',
-          'DIGITALLY AUTHENTICATED VIA TRINETRA OCR COMPLIANCE ENGINE',
-          '===================================================================',
-        ].join('\n');
-
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `TriNetra-Legal-Dossier-${reportId}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        try {
+          const res = generateSavedReportPdf(targetReport);
+          if (!res.success) {
+            alert(`Failed to generate PDF: ${res.error || 'Unknown error'}`);
+          }
+        } catch (e) {
+          console.error('PDF generation error:', e);
+          alert('Failed to generate PDF report.');
+        }
       }
-    }, 600);
+    }, 400);
   };
 
   const handlePrint = () => {

@@ -1,22 +1,21 @@
-import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Eye,
   LayoutDashboard,
   ScanLine,
-  QrCode,
-  ShieldCheck,
   FileText,
   LogOut,
-  ChevronDown,
-  ChevronRight,
   X,
   PanelLeftClose,
   PanelLeftOpen,
   User,
   Shield,
+  ClipboardList,
+  BarChart3,
+  Settings,
+  MapPin,
 } from 'lucide-react';
-import { useTriNetra } from '../context/TriNetraContext';
+import { useTriNetra, type UserRole } from '../context/TriNetraContext';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -35,13 +34,22 @@ export default function Sidebar({
   const navigate = useNavigate();
   const { officer, logout, reports } = useTriNetra();
 
-  // Keep Inspection submenu open if user is on /scanner or /verification
-  const isInspectionRoute =
-    location.pathname.startsWith('/scanner') ||
-    location.pathname.startsWith('/verification') ||
-    location.pathname.startsWith('/inspection');
+  // Safely determine active role from context or fallback to localStorage
+  const activeRole: UserRole = (() => {
+    if (officer?.role) return officer.role;
+    try {
+      const session = localStorage.getItem('activeSession');
+      if (session) {
+        const parsed = JSON.parse(session);
+        if (parsed?.role) return parsed.role as UserRole;
+      }
+    } catch (e) {
+      console.warn('Failed to parse activeSession in Sidebar:', e);
+    }
+    return 'Field Officer';
+  })();
 
-  const [isInspectionExpanded, setIsInspectionExpanded] = useState<boolean>(true);
+  const isAdmin = activeRole === 'Admin';
 
   const handleLogout = () => {
     logout();
@@ -50,9 +58,11 @@ export default function Sidebar({
   };
 
   const isDashboardActive = location.pathname === '/dashboard';
+  const isScannerActive = location.pathname.startsWith('/scanner') || location.pathname.startsWith('/inspection') || location.pathname.startsWith('/verification');
   const isReportsActive = location.pathname.startsWith('/reports');
-  const isScannerActive = location.pathname === '/scanner';
-  const isVerificationActive = location.pathname === '/verification';
+  const isOfficerLogsActive = location.pathname.startsWith('/officer-logs');
+  const isRegionalAnalyticsActive = location.pathname.startsWith('/regional-analytics');
+  const isSystemSettingsActive = location.pathname.startsWith('/system-settings');
 
   return (
     <>
@@ -84,7 +94,7 @@ export default function Sidebar({
             to="/dashboard"
             onClick={onClose}
             className="flex items-center gap-3 transition-opacity hover:opacity-90 overflow-hidden"
-            title="TriNetra Enterprise Officer Portal"
+            title="TriNetra Enterprise Portal"
           >
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/25 ring-1 ring-white/20">
               <Eye className="h-5 w-5" />
@@ -96,8 +106,12 @@ export default function Sidebar({
                   <span className="font-black text-lg tracking-tight text-white">
                     Tri<span className="text-blue-400">Netra</span>
                   </span>
-                  <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-blue-300 ring-1 ring-blue-400/30">
-                    Pro
+                  <span className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider ring-1 ${
+                    isAdmin
+                      ? 'bg-purple-500/20 text-purple-300 ring-purple-400/30'
+                      : 'bg-blue-500/20 text-blue-300 ring-blue-400/30'
+                  }`}>
+                    {isAdmin ? 'Admin' : 'Officer'}
                   </span>
                 </div>
                 <span className="text-[10px] font-medium text-slate-400 tracking-wide truncate">
@@ -117,7 +131,7 @@ export default function Sidebar({
             <X className="h-5 w-5" />
           </button>
 
-          {/* Desktop Collapse Toggle in header (when expanded) */}
+          {/* Desktop Collapse Toggle in header */}
           {onToggleCollapse && !isCollapsed && (
             <button
               type="button"
@@ -131,73 +145,192 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Navigation Links Area */}
+        {/* Navigation Links Area - DYNAMIC ROLE-BASED NAVIGATION */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-700">
-          {/* Main Navigation Group */}
           <div>
             {(!isCollapsed || isOpen) && (
               <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Core Operations
+                {isAdmin ? 'Administration Hub' : 'Field Operations'}
               </p>
             )}
 
             <nav className="space-y-1.5">
-              {/* 1. Dashboard Link */}
-              <Link
-                to="/dashboard"
-                onClick={onClose}
-                title={isCollapsed ? 'Dashboard' : undefined}
-                className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
-                  isDashboardActive
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold shadow-md shadow-blue-900/30'
-                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                }`}
-              >
-                <div
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                    isDashboardActive
-                      ? 'bg-white/20 text-white'
-                      : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
-                  }`}
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                </div>
-
-                {(!isCollapsed || isOpen) && (
-                  <div className="flex flex-1 items-center justify-between min-w-0">
-                    <span className="truncate">Dashboard</span>
-                    {isDashboardActive && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
-                    )}
-                  </div>
-                )}
-              </Link>
-
-              {/* 2. Inspection Section (Combining Scanner & Verification) */}
-              <div className="space-y-1">
-                {/* Parent Inspection Button / Link */}
-                <div
-                  className={`group relative flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 cursor-pointer ${
-                    isInspectionRoute && !isInspectionExpanded && (!isCollapsed || isOpen)
-                      ? 'bg-blue-950/60 text-blue-300 ring-1 ring-blue-500/30 font-semibold'
-                      : isInspectionRoute
-                      ? 'text-white'
-                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                  }`}
-                  onClick={() => {
-                    if (isCollapsed && !isOpen) {
-                      navigate('/scanner');
-                      return;
-                    }
-                    setIsInspectionExpanded(!isInspectionExpanded);
-                  }}
-                  title={isCollapsed ? 'Inspection (Scanner & Verification)' : undefined}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
+              {isAdmin ? (
+                /* ================= ADMIN ROLE NAVIGATION ================= */
+                <>
+                  {/* 1. Admin Overview */}
+                  <Link
+                    to="/dashboard"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Admin Overview' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isDashboardActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
                     <div
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                        isInspectionRoute
-                          ? 'bg-blue-500/20 text-blue-400'
+                        isDashboardActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <LayoutDashboard className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Admin Overview</span>
+                        {isDashboardActive && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
+                        )}
+                      </div>
+                    )}
+                  </Link>
+
+                  {/* 2. Officer Logs */}
+                  <Link
+                    to="/officer-logs"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Officer Logs' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isOfficerLogsActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isOfficerLogsActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <ClipboardList className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Officer Logs</span>
+                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                          {reports?.length ?? 5}
+                        </span>
+                      </div>
+                    )}
+                  </Link>
+
+                  {/* 3. Regional Analytics */}
+                  <Link
+                    to="/regional-analytics"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Regional Analytics' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isRegionalAnalyticsActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isRegionalAnalyticsActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <BarChart3 className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Regional Analytics</span>
+                        {isRegionalAnalyticsActive && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
+                        )}
+                      </div>
+                    )}
+                  </Link>
+
+                  {/* 4. System Settings */}
+                  <Link
+                    to="/system-settings"
+                    onClick={onClose}
+                    title={isCollapsed ? 'System Settings' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isSystemSettingsActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isSystemSettingsActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <Settings className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">System Settings</span>
+                        {isSystemSettingsActive && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
+                        )}
+                      </div>
+                    )}
+                  </Link>
+                </>
+              ) : (
+                /* ================= FIELD OFFICER ROLE NAVIGATION ================= */
+                <>
+                  {/* 1. Dashboard */}
+                  <Link
+                    to="/dashboard"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Dashboard' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isDashboardActive
+                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isDashboardActive
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
+                      }`}
+                    >
+                      <LayoutDashboard className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Dashboard</span>
+                        {isDashboardActive && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white shadow-xs" />
+                        )}
+                      </div>
+                    )}
+                  </Link>
+
+                  {/* 2. Start Inspection (Scanner) */}
+                  <Link
+                    to="/scanner"
+                    onClick={onClose}
+                    title={isCollapsed ? 'Start Inspection' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isScannerActive
+                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        isScannerActive
+                          ? 'bg-white/20 text-white'
                           : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
                       }`}
                     >
@@ -205,109 +338,53 @@ export default function Sidebar({
                     </div>
 
                     {(!isCollapsed || isOpen) && (
-                      <span className="truncate">Inspection</span>
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">Start Inspection</span>
+                        <span className="rounded bg-blue-500/30 px-1.5 py-0.5 text-[9px] font-extrabold text-blue-200">
+                          Scanner
+                        </span>
+                      </div>
                     )}
-                  </div>
+                  </Link>
 
-                  {(!isCollapsed || isOpen) && (
-                    <button
-                      type="button"
-                      aria-label="Toggle inspection menu"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsInspectionExpanded(!isInspectionExpanded);
-                      }}
-                      className="p-1 text-slate-400 hover:text-white transition"
-                    >
-                      {isInspectionExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {/* Inspection Sub-Navigation Items */}
-                {(!isCollapsed || isOpen) && isInspectionExpanded && (
-                  <div className="ml-5 pl-4 border-l border-slate-800 space-y-1 py-1">
-                    {/* Sub-item: Scanner */}
-                    <Link
-                      to="/scanner"
-                      onClick={onClose}
-                      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-150 ${
-                        isScannerActive
-                          ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                          : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
-                      }`}
-                    >
-                      <QrCode className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">Scanner & OCR</span>
-                      {isScannerActive && (
-                        <span className="ml-auto text-[10px] font-bold text-blue-100">
-                          Active
-                        </span>
-                      )}
-                    </Link>
-
-                    {/* Sub-item: Verification */}
-                    <Link
-                      to="/verification"
-                      onClick={onClose}
-                      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-150 ${
-                        isVerificationActive
-                          ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                          : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
-                      }`}
-                    >
-                      <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">AI Verification</span>
-                      {isVerificationActive && (
-                        <span className="ml-auto text-[10px] font-bold text-blue-100">
-                          Active
-                        </span>
-                      )}
-                    </Link>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Reports Link */}
-              <Link
-                to="/reports"
-                onClick={onClose}
-                title={isCollapsed ? 'Reports' : undefined}
-                className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
-                  isReportsActive
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold shadow-md shadow-blue-900/30'
-                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                }`}
-              >
-                <div
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                    isReportsActive
-                      ? 'bg-white/20 text-white'
-                      : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
-                  }`}
-                >
-                  <FileText className="h-4 w-4" />
-                </div>
-
-                {(!isCollapsed || isOpen) && (
-                  <div className="flex flex-1 items-center justify-between min-w-0">
-                    <span className="truncate">Reports</span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  {/* 3. My Reports */}
+                  <Link
+                    to="/reports"
+                    onClick={onClose}
+                    title={isCollapsed ? 'My Reports' : undefined}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                      isReportsActive
+                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold shadow-md shadow-blue-900/30'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    }`}
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
                         isReportsActive
-                          ? 'bg-white/25 text-white'
-                          : 'bg-slate-800 text-slate-300 group-hover:bg-slate-700'
+                          ? 'bg-white/20 text-white'
+                          : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-slate-800'
                       }`}
                     >
-                      {reports?.length ?? 5}
-                    </span>
-                  </div>
-                )}
-              </Link>
+                      <FileText className="h-4 w-4" />
+                    </div>
+
+                    {(!isCollapsed || isOpen) && (
+                      <div className="flex flex-1 items-center justify-between min-w-0">
+                        <span className="truncate">My Reports</span>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            isReportsActive
+                              ? 'bg-white/25 text-white'
+                              : 'bg-slate-800 text-slate-300 group-hover:bg-slate-700'
+                          }`}
+                        >
+                          {reports?.length ?? 5}
+                        </span>
+                      </div>
+                    )}
+                  </Link>
+                </>
+              )}
             </nav>
           </div>
 
@@ -320,11 +397,13 @@ export default function Sidebar({
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                 </span>
                 <span className="font-semibold text-slate-300 text-[11px]">
-                  Statutory Rule 2021
+                  {isAdmin ? 'Admin Governance Grid' : 'Enforcement Protocol 2021'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug">
-                Standard Weights & Packaging compliance engine online.
+                {isAdmin
+                  ? 'All Gujarat regional inspection nodes connected & synced.'
+                  : 'Weights & Packaging compliance scanner engine online.'}
               </p>
             </div>
           )}
@@ -332,11 +411,14 @@ export default function Sidebar({
 
         {/* Sidebar Footer: Officer Profile & Logout */}
         <div className="shrink-0 border-t border-slate-800/80 p-3 bg-slate-950/40">
-          {/* When expanded on desktop or inside mobile drawer */}
           {!isCollapsed || isOpen ? (
             <div className="space-y-2">
               <div className="flex items-center gap-3 rounded-xl bg-slate-800/50 p-2.5 border border-slate-700/60">
-                <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-xs shadow-inner">
+                <div className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white font-bold text-xs shadow-inner ${
+                  isAdmin
+                    ? 'bg-gradient-to-tr from-purple-600 to-indigo-600'
+                    : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
+                }`}>
                   <User className="h-4 w-4" />
                   <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
                 </div>
@@ -344,16 +426,20 @@ export default function Sidebar({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
                     <span className="font-semibold text-xs text-white truncate">
-                      {officer?.name || 'Authorized Officer'}
+                      {officer?.name || (isAdmin ? 'Director Amit Trivedi' : 'Rajesh Varma')}
                     </span>
-                    <Shield className="h-3 w-3 text-blue-400 shrink-0" />
+                    <Shield className={`h-3 w-3 shrink-0 ${isAdmin ? 'text-purple-400' : 'text-blue-400'}`} />
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                     <span className="font-mono text-blue-300 truncate">
-                      {officer?.badgeId || 'INSP-DL-402'}
+                      {officer?.badgeId || (isAdmin ? 'ADMIN-HQ-01' : 'INSP-GJ-2041')}
                     </span>
                     <span>•</span>
-                    <span className="truncate">{officer?.region || 'Delhi NCT'}</span>
+                    <span className="text-emerald-400 font-semibold">{activeRole}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+                    <MapPin className="h-3 w-3 text-slate-500" />
+                    <span className="truncate">{officer?.region || (isAdmin ? 'Gandhinagar' : 'Ahmedabad')}</span>
                   </div>
                 </div>
               </div>
@@ -361,14 +447,14 @@ export default function Sidebar({
               <div className="flex items-center gap-2">
                 <div className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-2 py-1.5 text-[11px] font-medium text-emerald-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Shift Active</span>
+                  <span>{activeRole} Active</span>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleLogout}
                   className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-900/60 bg-rose-950/40 px-2 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 hover:text-white transition"
-                  title="Sign out of officer account"
+                  title="Sign out of account"
                 >
                   <LogOut className="h-3.5 w-3.5" />
                   <span>Logout</span>
@@ -380,9 +466,9 @@ export default function Sidebar({
             <div className="flex flex-col items-center gap-2">
               <div
                 className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-200"
-                title={`${officer?.name || 'Officer'} (${officer?.badgeId || 'INSP-DL-402'})`}
+                title={`${officer?.name || 'User'} (${activeRole} • ${officer?.region || 'HQ'})`}
               >
-                <User className="h-4 w-4 text-blue-400" />
+                <User className={`h-4 w-4 ${isAdmin ? 'text-purple-400' : 'text-blue-400'}`} />
                 <span className="absolute bottom-1 right-1 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-slate-900" />
               </div>
 

@@ -3,70 +3,93 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --color-primary: 37 99 235;
+    --color-navy: 15 23 42;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
+    background-color: #f8fafc;
+    color: #0f172a;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom Luxury Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.7);
   }
 }
 
-/* Luxury Government Theme Utilities */
+/* Luxury Enterprise Theme Utilities */
 @layer utilities {
-  .glass-card {
-    background: rgba(255, 255, 255, 0.88);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(226, 232, 240, 0.85);
-  }
-
-  .glass-card-navy {
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 58, 138, 0.92));
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+  }
+
+  .glass-panel-dark {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.94) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .card-luxury {
+    border-radius: 1.25rem;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    background: #ffffff;
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .card-luxury:hover {
+    box-shadow: 0 20px 30px -8px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+    border-color: rgba(203, 213, 225, 0.9);
+  }
+
+  .tricolor-bar {
+    background: linear-gradient(90deg, #FF9933 0%, #FFFFFF 50%, #138808 100%);
   }
 
   .gold-glow {
-    box-shadow: 0 0 25px -5px rgba(234, 179, 8, 0.25);
+    box-shadow: 0 0 30px -5px rgba(245, 158, 11, 0.25);
   }
 
   .blue-glow {
-    box-shadow: 0 10px 30px -10px rgba(37, 99, 235, 0.25);
+    box-shadow: 0 12px 32px -8px rgba(37, 99, 235, 0.28);
   }
 }
 
-/* Micro-animations */
-@keyframes pulseSubtle {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.92;
-    transform: scale(1.008);
-  }
-}
-
-@keyframes floatSlow {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
-.animate-pulse-subtle {
-  animation: pulseSubtle 4s ease-in-out infinite;
-}
-
-.animate-float-slow {
-  animation: floatSlow 6s ease-in-out infinite;
-}
-
-@keyframes fadeInPage {
+/* Animations */
+@keyframes fadeInSlide {
   0% {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   100% {
     opacity: 1;
@@ -75,5 +98,20 @@
 }
 
 .animate-fade-in {
-  animation: fadeInPage 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeInSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
+  }
+  50% {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 16px rgba(59, 130, 246, 0.7));
+  }
+}
+
+.animate-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
 }

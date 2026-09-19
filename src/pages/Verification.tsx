@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useState, useMemo } from 'react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   CircleCheck,
   CircleX,
@@ -13,8 +13,10 @@ import {
   Sparkles,
   Info,
   UserCheck,
+  ScanLine,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
+import type { InspectionOcrAnalysis } from '../utils/legalMetrologyOcr';
 
 type Verdict = 'compliant' | 'non-compliant' | null;
 
@@ -38,73 +40,115 @@ export default function Verification() {
     imageUrl?: string;
     category?: string;
     quality?: string;
+    analysis?: InspectionOcrAnalysis;
   } | null;
 
-  const [verdict, setVerdict] = useState<Verdict>(null);
+  const analysis = scannerState?.analysis;
+
+  const [verdict, setVerdict] = useState<Verdict>(() => {
+    if (analysis?.verdict === 'Compliant') return 'compliant';
+    if (analysis?.verdict === 'Non-Compliant') return 'non-compliant';
+    return null;
+  });
+
   const [officerNotes, setOfficerNotes] = useState<string>('');
 
-  // Mandatory statutory checklist under Legal Metrology (Packaged Commodities) Rules, 2011
-  const rulesList: StatutoryRuleItem[] = [
-    {
-      id: 'mrp',
-      ruleNo: 'Rule 6(1)(e)',
-      label: 'Maximum Retail Price (MRP)',
-      extractedValue: '₹120.00 (Incl. of all taxes) / ₹१२०.०० (सभी कर सहित)',
-      status: 'found',
-      statusLabel: 'Compliant & Visible',
-      explanation: 'Includes statutory tax phrasing and standard rupee currency symbol.',
-    },
-    {
-      id: 'net_qty',
-      ruleNo: 'Rule 6(1)(c)',
-      label: 'Net Quantity Declaration',
-      extractedValue: 'Net Wt / शुद्ध वजन : 500 g',
-      status: 'found',
-      statusLabel: 'Standard Unit Verified',
-      explanation: 'Expresses weight in metric units conforming to Seventh Schedule specifications.',
-    },
-    {
-      id: 'mfg_date',
-      ruleNo: 'Rule 6(1)(d)',
-      label: 'Month & Year of Manufacture / Expiry',
-      extractedValue: '[Indecipherable / Smudged Dot-Matrix Stamp]',
-      status: 'warning',
-      statusLabel: 'Missing or Incomplete',
-      explanation: 'Mandatory declaration could not be verified with confidence (>90% threshold).',
-    },
-    {
-      id: 'consumer_care',
-      ruleNo: 'Rule 6(1)(a) & (g)',
-      label: 'Manufacturer Address & Consumer Helpline',
-      extractedValue: 'TriNetra Agri Foods Ltd, New Delhi-110020 | 1800-11-4000',
-      status: 'found',
-      statusLabel: 'Verified Registration',
-      explanation: 'Contains complete registered postal address, email, and toll-free helpline number.',
-    },
-  ];
+  // Transform genuine OCR rules from analysis if available
+  const rulesList: StatutoryRuleItem[] = useMemo(() => {
+    if (analysis?.rules && analysis.rules.length > 0) {
+      return analysis.rules.map((r) => ({
+        id: r.id,
+        ruleNo: r.ruleNo,
+        label: r.label,
+        extractedValue: r.extractedSnippet,
+        status:
+          r.status === 'Compliant'
+            ? 'found'
+            : (r.status as string) === 'Manual Review'
+            ? 'warning'
+            : 'missing',
+        statusLabel: r.statusLabel,
+        explanation: r.explanation,
+      }));
+    }
+
+    // Default statutory checklist fallback
+    return [
+      {
+        id: 'mrp',
+        ruleNo: 'Rule 6(1)(e)',
+        label: 'Maximum Retail Price (MRP)',
+        extractedValue: '[Awaiting Image Scan from Inspector]',
+        status: 'warning',
+        statusLabel: 'Pending Scan',
+        explanation: 'Mandatory price denomination inclusive of all statutory taxes.',
+      },
+      {
+        id: 'net_qty',
+        ruleNo: 'Rule 6(1)(c)',
+        label: 'Net Quantity Declaration',
+        extractedValue: '[Awaiting Image Scan from Inspector]',
+        status: 'warning',
+        statusLabel: 'Pending Scan',
+        explanation: 'Metric units conforming to Seventh Schedule specifications.',
+      },
+      {
+        id: 'mfg_date',
+        ruleNo: 'Rule 6(1)(d)',
+        label: 'Month & Year of Manufacture / Expiry',
+        extractedValue: '[Awaiting Image Scan from Inspector]',
+        status: 'warning',
+        statusLabel: 'Pending Scan',
+        explanation: 'Chronological packaging, manufacturing or batch stamp verification.',
+      },
+      {
+        id: 'consumer_care',
+        ruleNo: 'Rule 6(1)(a) & (g)',
+        label: 'Manufacturer Address & Consumer Helpline',
+        extractedValue: '[Awaiting Image Scan from Inspector]',
+        status: 'warning',
+        statusLabel: 'Pending Scan',
+        explanation: 'Registered corporate identity and toll-free consumer grievance contact.',
+      },
+    ];
+  }, [analysis]);
+
+  const rawLines = useMemo(() => {
+    if (analysis?.rawText) {
+      return analysis.rawText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    }
+    return [];
+  }, [analysis]);
 
   const handleGenerateReport = () => {
     if (!verdict) return;
 
     try {
-      // Dynamically record report in global context
+      const productName = analysis?.detectedProductName || 'Inspected Commodity Package';
+      const brand = analysis?.detectedBrand || 'Domestic Manufacturer';
+      const category = scannerState?.category || 'Food & Beverages';
+      const confidence = analysis?.confidence ? `${Math.round(analysis.confidence)}%` : '91.5%';
+
       const createdReport = addReport({
-        productName: 'Sample Inspected Package Feed',
-        brand: 'TriNetra Foods India Ltd',
-        category: scannerState?.category || 'Food & Beverages',
-        location: `${officer?.region || 'Ahmedabad Zone'}, Field Unit`,
+        productName,
+        brand,
+        category,
+        location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
         verdict: verdict === 'compliant' ? 'Compliant' : 'Non-Compliant',
         violations:
           verdict === 'non-compliant'
-            ? [
-                'Rule 6(1)(d) - Omission of legible Month & Year of Manufacture/Expiry',
-                'Section 36 - Notice issued for non-conforming packaging declarations',
-              ]
+            ? analysis?.violations && analysis.violations.length > 0
+              ? analysis.violations
+              : ['Rule 6(1)(d) - Omission of legible Month & Year of Manufacture/Expiry']
             : undefined,
         findings:
           officerNotes ||
-          'Automated statutory OCR validation confirmed against Legal Metrology Rules, 2011.',
-        ocrConfidence: scannerState?.quality === 'warning' ? '82.0%' : '94.2%',
+          analysis?.summaryFindings ||
+          'Automated statutory OCR validation evaluated against Legal Metrology Rules, 2011.',
+        ocrConfidence: confidence,
         imageUrl: scannerState?.imageUrl || null,
       });
 
@@ -120,57 +164,103 @@ export default function Verification() {
   };
 
   return (
-    <div className="w-full space-y-6 pb-6">
+    <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
       {/* 1. Page Header */}
-      <div className="flex flex-col gap-3 border-b border-gray-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-700/10">
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
             <Scale className="h-3.5 w-3.5" />
             <span>Legal Metrology (Packaged Commodities) Rules, 2011</span>
           </div>
-          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">
-            Compliance Verification
+          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
+            Compliance Verification Docket
           </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Inspecting Officer: <strong className="text-gray-800">{officer?.name || 'Rajesh Varma'}</strong> ({officer?.badgeId || 'INSP-GJ-2041'})
+          <p className="mt-1 text-xs sm:text-sm text-slate-500">
+            Inspecting Officer:{' '}
+            <strong className="text-slate-800">{officer?.name || 'Inspector Rajesh Varma'}</strong> (
+            {officer?.badgeId || 'INSP-GJ-2041'}) • Jurisdiction:{' '}
+            <strong className="text-slate-800">{officer?.region || 'Gujarat'}</strong>
           </p>
         </div>
 
-        {scannerState?.category && (
-          <div className="self-start rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium text-gray-600 shadow-sm sm:self-auto">
-            Commodity Class: <span className="font-semibold text-gray-900">{scannerState.category}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {scannerState?.category && (
+            <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-xs">
+              Class: <span className="text-blue-600 font-bold">{scannerState.category}</span>
+            </div>
+          )}
+
+          <Link
+            to="/scanner"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs hover:bg-slate-50 transition"
+          >
+            <ScanLine className="h-3.5 w-3.5 text-blue-600" />
+            <span>Live Scanner</span>
+          </Link>
+        </div>
       </div>
 
-      {/* 2. AI Preliminary Status Banner */}
-      <div className="rounded-2xl border border-amber-200 bg-amber-50/90 p-4 shadow-sm sm:p-5">
+      {/* 2. Preliminary Status Banner */}
+      <div
+        className={`rounded-2xl border p-4.5 shadow-xs transition-all ${
+          analysis?.verdict === 'Compliant'
+            ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950'
+            : analysis?.verdict === 'Non-Compliant'
+            ? 'border-rose-200 bg-rose-50/80 text-rose-950'
+            : 'border-amber-200 bg-amber-50/90 text-amber-950'
+        }`}
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-              <TriangleAlert className="h-5 w-5" />
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold text-white shadow-xs ${
+                analysis?.verdict === 'Compliant'
+                  ? 'bg-emerald-600'
+                  : analysis?.verdict === 'Non-Compliant'
+                  ? 'bg-rose-600'
+                  : 'bg-amber-600'
+              }`}
+            >
+              {analysis?.verdict === 'Compliant' ? (
+                <CircleCheck className="h-5 w-5" />
+              ) : analysis?.verdict === 'Non-Compliant' ? (
+                <CircleX className="h-5 w-5" />
+              ) : (
+                <TriangleAlert className="h-5 w-5" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
-                  AI Preliminary Assessment
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  Tesseract OCR Automated Assessment
                 </span>
-                <span className="rounded-full bg-amber-200/70 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
-                  Confidence: 74%
-                </span>
+                {analysis?.confidence && (
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-bold text-slate-800 ring-1 ring-black/10">
+                    Confidence: {Math.round(analysis.confidence)}%
+                  </span>
+                )}
               </div>
-              <h2 className="mt-0.5 text-base font-bold text-amber-950 sm:text-lg">
-                Status: Manual Review Required (Missing Mandatory Date)
+              <h2 className="mt-0.5 text-base font-bold sm:text-lg">
+                Status:{' '}
+                {analysis
+                  ? analysis.verdict === 'Compliant'
+                    ? 'Fully Compliant with Statutory Declarations'
+                    : analysis.verdict === 'Non-Compliant'
+                    ? 'Statutory Infraction Flagged (Missing Mandatory Declarations)'
+                    : 'Manual Verification Required'
+                  : 'Awaiting Package Image Scan'}
               </h2>
-              <p className="mt-1 text-xs text-amber-800">
-                Rule 6(1)(d) violation risk identified. The manufacturing or packaging date imprint is obscured or omitted from the inspected panel.
+              <p className="mt-1 text-xs opacity-90 leading-relaxed">
+                {analysis
+                  ? analysis.summaryFindings
+                  : 'No active scan data loaded. Please capture or upload packaging artwork in the Scanner.'}
               </p>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 self-end rounded-lg bg-white/90 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm sm:self-center">
-            <Sparkles className="h-3.5 w-3.5 text-amber-600" />
-            <span>AI Flagged</span>
+          <div className="flex shrink-0 items-center gap-2 self-end rounded-xl bg-white/90 px-3 py-1.5 text-xs font-bold text-slate-800 shadow-xs sm:self-center">
+            <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+            <span>OCR Verified</span>
           </div>
         </div>
       </div>
@@ -180,18 +270,18 @@ export default function Verification() {
         {/* SECTION A: Visual Feed & Multilingual OCR Results (5 cols) */}
         <div className="space-y-5 lg:col-span-5">
           {/* Image Visualizer */}
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-600">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600">
                 <Camera className="h-4 w-4 text-blue-600" />
-                <span>Inspection Artifact</span>
+                <span>Inspection Artifact Evidence</span>
               </h3>
-              <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
                 Live Evidence
               </span>
             </div>
 
-            <div className="mt-3 flex min-h-[220px] max-h-[280px] w-full items-center justify-center overflow-hidden rounded-xl bg-gray-900">
+            <div className="mt-3 flex min-h-[220px] max-h-[280px] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-950">
               {scannerState?.imageUrl ? (
                 <img
                   src={scannerState.imageUrl}
@@ -199,119 +289,124 @@ export default function Verification() {
                   className="max-h-[260px] w-full object-contain"
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center p-6 text-center text-gray-400">
-                  <FileText className="h-10 w-10 text-gray-500 mb-2" />
-                  <span className="text-xs font-medium">Standard Packaging Panel Feed</span>
-                  <span className="text-[11px] text-gray-500">Live OCR active</span>
+                <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                  <FileText className="h-10 w-10 text-slate-600 mb-2" />
+                  <span className="text-xs font-semibold text-slate-300">
+                    No Live Packaging Image Loaded
+                  </span>
+                  <Link
+                    to="/scanner"
+                    className="mt-2 text-[11px] font-bold text-blue-400 hover:underline"
+                  >
+                    Click to Open Scanner
+                  </Link>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Multilingual Extracted Text Box */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+          {/* Genuine Extracted Text Box */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Languages className="h-4 w-4 text-blue-600" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
-                  Extracted Text (Multilingual OCR)
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Extracted Raw Typography (Tesseract OCR)
                 </h3>
               </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-medium text-blue-700">
-                EN + HI (Devanagari)
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                {rawLines.length} Lines Detected
               </span>
             </div>
 
-            <div className="mt-4 space-y-3 rounded-xl bg-gray-50 p-4 font-mono text-xs text-gray-800">
-              <div className="border-b border-gray-200/60 pb-2">
-                <span className="text-gray-400 block text-[10px]">RAW LINE 01</span>
-                <p className="font-semibold text-gray-900">
-                  Net Wt / शुद्ध वजन : <span className="text-blue-700">500g</span>
-                </p>
+            {rawLines.length > 0 ? (
+              <div className="mt-4 max-h-64 space-y-2 overflow-y-auto rounded-xl bg-slate-900 p-3.5 font-mono text-xs text-slate-200">
+                {rawLines.map((line, idx) => (
+                  <div key={idx} className="border-b border-slate-800 pb-1.5 last:border-none">
+                    <span className="text-slate-500 text-[10px] block font-mono">
+                      LINE {String(idx + 1).padStart(2, '0')}
+                    </span>
+                    <p className="font-medium text-emerald-400 break-words">{line}</p>
+                  </div>
+                ))}
               </div>
-
-              <div className="border-b border-gray-200/60 pb-2">
-                <span className="text-gray-400 block text-[10px]">RAW LINE 02</span>
-                <p className="font-semibold text-gray-900">
-                  MRP / एम.आर.पी : <span className="text-blue-700">₹120.00</span> (Inclusive of all taxes / सभी कर सहित)
-                </p>
+            ) : (
+              <div className="mt-4 rounded-xl bg-slate-50 p-6 text-center text-xs text-slate-500">
+                <p>Run a scan in the Scanner page to populate real OCR text contours.</p>
+                <Link
+                  to="/scanner"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
+                >
+                  <ScanLine className="h-3.5 w-3.5" />
+                  <span>Open Scanner</span>
+                </Link>
               </div>
-
-              <div className="border-b border-gray-200/60 pb-2">
-                <span className="text-gray-400 block text-[10px]">RAW LINE 03</span>
-                <p className="font-semibold text-gray-900">
-                  Batch No. / घान संख्या : <span className="text-gray-700">TR-2026-SEP</span>
-                </p>
-              </div>
-
-              <div className="border-b border-gray-200/60 pb-2">
-                <span className="text-gray-400 block text-[10px]">RAW LINE 04 [AMBIGUOUS]</span>
-                <p className="text-amber-800 font-semibold bg-amber-100/50 p-1 rounded">
-                  Mfg Dt: **/**/202* [UNRESOLVED - OCR CONFIDENCE 28%]
-                </p>
-              </div>
-
-              <div>
-                <span className="text-gray-400 block text-[10px]">RAW LINE 05</span>
-                <p className="text-gray-700">
-                  Mfg by: TriNetra Foods Ltd, New Delhi - 110020. Customer Care: 1800-11-4000
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
         {/* SECTION B: Statutory Rules Checklist (7 cols) */}
         <div className="space-y-4 lg:col-span-7">
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
-                <h3 className="text-sm font-bold text-gray-900">
+                <h3 className="text-sm font-bold text-slate-900">
                   Mandatory Statutory Declarations Audit
                 </h3>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-slate-500">
                   Verified against Section 18 of the Legal Metrology Act, 2009
                 </p>
               </div>
-              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
                 4 Rules Evaluated
               </span>
             </div>
 
-            {/* Checklist Items */}
-            <div className="mt-4 divide-y divide-gray-100">
+            <div className="mt-4 space-y-3.5">
               {rulesList.map((item) => (
-                <div key={item.id} className="py-4 first:pt-0 last:pb-0">
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 transition hover:border-slate-200"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+                        <span className="rounded bg-blue-100/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-blue-800">
                           {item.ruleNo}
                         </span>
-                        <h4 className="text-sm font-bold text-gray-900">{item.label}</h4>
+                        <h4 className="text-xs font-bold text-slate-900">{item.label}</h4>
                       </div>
 
-                      <div className="rounded-md bg-gray-50 px-3 py-2 text-xs font-medium text-gray-800">
-                        <span className="text-gray-400 text-[10px] uppercase block">Extracted Content:</span>
-                        {item.extractedValue}
+                      <div className="mt-1.5 rounded-lg border border-slate-200/80 bg-white p-2 font-mono text-xs text-slate-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                          Detected in Artwork:
+                        </span>
+                        <span className="break-all font-semibold text-slate-900">
+                          {item.extractedValue}
+                        </span>
                       </div>
 
-                      <p className="text-xs text-gray-500 pt-0.5">{item.explanation}</p>
+                      <p className="text-[11px] text-slate-500 pt-1">{item.explanation}</p>
                     </div>
 
-                    {/* Status Badge */}
                     <div className="shrink-0 pt-0.5">
                       {item.status === 'found' ? (
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
                           <CircleCheck className="h-4 w-4 text-emerald-600" />
                           <span className="hidden sm:inline">{item.statusLabel}</span>
                           <span className="sm:hidden">Found</span>
                         </div>
-                      ) : (
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-600/20">
+                      ) : item.status === 'warning' ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-600/20">
                           <TriangleAlert className="h-4 w-4 text-amber-600" />
                           <span className="hidden sm:inline">{item.statusLabel}</span>
-                          <span className="sm:hidden">Alert</span>
+                          <span className="sm:hidden">Review</span>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-600/20">
+                          <CircleX className="h-4 w-4 text-rose-600" />
+                          <span className="hidden sm:inline">{item.statusLabel}</span>
+                          <span className="sm:hidden">Missing</span>
                         </div>
                       )}
                     </div>
@@ -332,17 +427,17 @@ export default function Verification() {
       </div>
 
       {/* 4. Human-in-the-Loop (Final Officer Verdict Panel) */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-7">
-        <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-7">
+        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
             <UserCheck className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-base font-bold text-slate-900">
               Officer Final Verdict (Human-in-the-Loop)
             </h3>
-            <p className="text-xs text-gray-500">
-              The AI system recommends manual validation. Confirm or override compliance status as the inspecting officer.
+            <p className="text-xs text-slate-500">
+              Confirm or override the AI automated compliance status based on statutory guidelines.
             </p>
           </div>
         </div>
@@ -353,39 +448,50 @@ export default function Verification() {
             <button
               type="button"
               onClick={() => setVerdict('compliant')}
-              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 ${
+              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 cursor-pointer ${
                 verdict === 'compliant'
-                  ? 'border-emerald-600 bg-emerald-50/90 text-emerald-900 shadow-lg shadow-emerald-600/15 ring-4 ring-emerald-500/20 scale-[1.02]'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:bg-emerald-50/40 hover:scale-[1.01] active:scale-95'
+                  ? 'border-emerald-600 bg-emerald-50/90 text-emerald-900 shadow-lg shadow-emerald-600/15 ring-4 ring-emerald-500/20 scale-[1.01]'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:bg-emerald-50/40 active:scale-95'
               }`}
             >
-              <CircleCheck className={`h-6 w-6 ${verdict === 'compliant' ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <CircleCheck
+                className={`h-6 w-6 ${verdict === 'compliant' ? 'text-emerald-600' : 'text-slate-400'}`}
+              />
               <div className="text-left">
-                <span className="block text-base">Mark as Compliant</span>
-                <span className="block text-xs font-normal text-slate-500">All mandatory rules satisfied</span>
+                <span className="block text-base font-bold">Mark as Compliant</span>
+                <span className="block text-xs font-normal text-slate-500">
+                  All mandatory rules satisfied
+                </span>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => setVerdict('non-compliant')}
-              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 ${
+              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 cursor-pointer ${
                 verdict === 'non-compliant'
-                  ? 'border-rose-600 bg-rose-50/90 text-rose-900 shadow-lg shadow-rose-600/15 ring-4 ring-rose-500/20 scale-[1.02]'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-rose-400 hover:bg-rose-50/40 hover:scale-[1.01] active:scale-95'
+                  ? 'border-rose-600 bg-rose-50/90 text-rose-900 shadow-lg shadow-rose-600/15 ring-4 ring-rose-500/20 scale-[1.01]'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-rose-400 hover:bg-rose-50/40 active:scale-95'
               }`}
             >
-              <CircleX className={`h-6 w-6 ${verdict === 'non-compliant' ? 'text-rose-600' : 'text-slate-400'}`} />
+              <CircleX
+                className={`h-6 w-6 ${verdict === 'non-compliant' ? 'text-rose-600' : 'text-slate-400'}`}
+              />
               <div className="text-left">
-                <span className="block text-base">Mark as Non-Compliant</span>
-                <span className="block text-xs font-normal text-slate-500">Issue notice / statutory violation</span>
+                <span className="block text-base font-bold">Mark as Non-Compliant</span>
+                <span className="block text-xs font-normal text-slate-500">
+                  Issue statutory notice / violation
+                </span>
               </div>
             </button>
           </div>
 
           {/* Optional Officer Remark */}
           <div className="pt-2">
-            <label htmlFor="officer-notes" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+            <label
+              htmlFor="officer-notes"
+              className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+            >
               Officer Inspection Remarks (Optional)
             </label>
             <input
@@ -393,14 +499,14 @@ export default function Verification() {
               type="text"
               value={officerNotes}
               onChange={(e) => setOfficerNotes(e.target.value)}
-              placeholder="e.g., Physical date stamp smudged on corner seal; recommended for secondary sample audit."
-              className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-2.5 px-4 text-xs font-medium text-slate-900 shadow-sm transition hover:border-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="e.g., Physical date stamp verified on seal; secondary optical examination confirms compliance."
+              className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-2.5 px-4 text-xs font-medium text-slate-900 shadow-xs transition hover:border-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
         </div>
 
         {/* 5. Next Step Action */}
-        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-3xl border border-slate-200/90 bg-slate-50/80 p-5 transition-all sm:flex-row">
+        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-5 sm:flex-row">
           <div className="flex items-center gap-3 text-xs text-slate-700">
             {verdict ? (
               <>
@@ -428,7 +534,7 @@ export default function Verification() {
             type="button"
             disabled={!verdict}
             onClick={handleGenerateReport}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-7 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-xl shadow-blue-500/25 transition-all duration-200 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/35 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto shrink-0"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-7 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-xl shadow-blue-500/25 transition-all duration-200 hover:brightness-110 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto shrink-0 cursor-pointer"
           >
             <span>Generate Evidence Report</span>
             <ChevronRight className="h-4 w-4" />
