@@ -24,11 +24,58 @@ import {
   Video,
   X,
   ShieldAlert,
+  Clock,
+  Scale,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
 import { analyzePackagingText, type InspectionOcrAnalysis } from '../utils/legalMetrologyOcr';
 import { generateInspectionPdf } from '../utils/generatePdfReport';
 import { scannerAPI } from '../utils/api';
+
+const ALL_STATUTORY_RULES = [
+  {
+    id: 'mfg_details',
+    ruleNo: 'Rule 6(1)(a)',
+    label: 'Manufacturer & Packer Details',
+    description: 'Name and complete address of the manufacturer, packer, or importer',
+  },
+  {
+    id: 'net_weight',
+    ruleNo: 'Rule 6(1)(c)',
+    label: 'Net Quantity / Weight Declaration',
+    description: 'Net weight, volume, or piece count in standard metric units',
+  },
+  {
+    id: 'mfg_date',
+    ruleNo: 'Rule 6(1)(d)',
+    label: 'Date of Mfg / Packing (PKD)',
+    description: 'Month and year of manufacture or packaging chronology',
+  },
+  {
+    id: 'mrp',
+    ruleNo: 'Rule 6(1)(e)',
+    label: 'Maximum Retail Price (MRP)',
+    description: 'Maximum Retail Price inclusive of all statutory taxes',
+  },
+  {
+    id: 'country_origin',
+    ruleNo: 'Rule 6(1)(f)',
+    label: 'Country of Origin',
+    description: 'Country where goods were manufactured, packed, or imported',
+  },
+  {
+    id: 'customer_care',
+    ruleNo: 'Rule 6(1)(g)',
+    label: 'Consumer Care / Grievance Redressal',
+    description: 'Helpline number, email, and consumer redressal address',
+  },
+  {
+    id: 'unit_sale_price',
+    ruleNo: 'Rule 11',
+    label: 'Unit Sale Price (USP)',
+    description: 'Statutory price per standard metric unit (e.g., ₹/g, ₹/ml, ₹/unit)',
+  },
+] as const;
 
 const CATEGORIES = [
   'Food & Beverages',
@@ -155,7 +202,7 @@ export default function Scanner() {
 
       const constraints: MediaStreamConstraints = {
         video: {
-          facingMode: { ideal: mode },
+          facingMode: { ideal: mode || 'environment' },
           width: { ideal: 1920, min: 640 },
           height: { ideal: 1080, min: 480 },
         },
@@ -676,6 +723,7 @@ export default function Scanner() {
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        capture="environment"
         className="hidden"
         onChange={handleFileChange}
       />
@@ -700,7 +748,7 @@ export default function Scanner() {
                   setIntakeTab('camera');
                   if (!isLiveCameraOpen) startLiveCamera('environment');
                 }}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-2 min-h-[44px] rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                   intakeTab === 'camera'
                     ? 'bg-white text-blue-700 shadow-xs ring-1 ring-black/5'
                     : 'text-slate-600 hover:text-slate-900'
@@ -716,7 +764,7 @@ export default function Scanner() {
                   stopLiveCamera();
                   setIntakeTab('upload');
                 }}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-2 min-h-[44px] rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                   intakeTab === 'upload'
                     ? 'bg-white text-blue-700 shadow-xs ring-1 ring-black/5'
                     : 'text-slate-600 hover:text-slate-900'
@@ -739,14 +787,14 @@ export default function Scanner() {
                   <button
                     type="button"
                     onClick={() => startLiveCamera()}
-                    className="rounded-lg bg-rose-600 px-3 py-1.5 font-bold text-white shadow-xs hover:bg-rose-700 cursor-pointer"
+                    className="rounded-lg bg-rose-600 min-h-[44px] px-3.5 py-2 font-bold text-white shadow-xs hover:bg-rose-700 cursor-pointer"
                   >
                     Retry Live Camera
                   </button>
                   <button
                     type="button"
                     onClick={() => setIntakeTab('upload')}
-                    className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                    className="rounded-lg border border-rose-300 bg-white min-h-[44px] px-3.5 py-2 font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
                   >
                     Switch to File Upload
                   </button>
@@ -759,7 +807,7 @@ export default function Scanner() {
           {intakeTab === 'camera' && (
             <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl">
               {/* Viewfinder Video Frame */}
-              <div className="relative flex aspect-video max-h-[500px] w-full items-center justify-center overflow-hidden bg-black">
+              <div className="relative flex aspect-[3/4] sm:aspect-video max-h-[560px] w-full items-center justify-center overflow-hidden bg-black">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -806,7 +854,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={toggleCameraFacingMode}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white backdrop-blur-md border border-white/10 hover:bg-black/90 transition cursor-pointer"
+                      className="inline-flex items-center gap-1.5 min-h-[44px] rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white backdrop-blur-md border border-white/10 hover:bg-black/90 transition cursor-pointer"
                       title="Switch Camera (Front/Rear)"
                     >
                       <SwitchCamera className="h-3.5 w-3.5 text-blue-400" />
@@ -816,7 +864,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={() => setIntakeTab('upload')}
-                      className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-black/70 text-slate-300 hover:text-white backdrop-blur-md border border-white/10 transition cursor-pointer"
+                      className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full bg-black/70 text-slate-300 hover:text-white backdrop-blur-md border border-white/10 transition cursor-pointer"
                       title="Close Live Camera"
                     >
                       <X className="h-4 w-4" />
@@ -846,7 +894,7 @@ export default function Scanner() {
                     type="button"
                     onClick={captureLivePhoto}
                     disabled={isCameraStarting}
-                    className="group relative inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600 px-6 py-3.5 text-sm font-black uppercase tracking-wider text-white shadow-xl shadow-emerald-500/25 transition-all duration-150 hover:brightness-110 active:scale-95 disabled:opacity-50 cursor-pointer"
+                    className="group relative inline-flex items-center justify-center min-h-[44px] gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600 px-6 py-3.5 text-sm font-black uppercase tracking-wider text-white shadow-xl shadow-emerald-500/25 transition-all duration-150 hover:brightness-110 active:scale-95 disabled:opacity-50 cursor-pointer"
                   >
                     <Camera className="h-5 w-5 transition group-hover:scale-110" />
                     <span>Capture Packaging Photo</span>
@@ -892,7 +940,7 @@ export default function Scanner() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-500/25 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
+                  className="inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-500/25 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
                 >
                   <UploadCloud className="h-4 w-4" />
                   <span>Browse Image File</span>
@@ -904,7 +952,7 @@ export default function Scanner() {
                     setIntakeTab('camera');
                     startLiveCamera('environment');
                   }}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs transition-all duration-150 hover:bg-slate-50 hover:text-slate-900 active:scale-95 cursor-pointer"
+                  className="inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs transition-all duration-150 hover:bg-slate-50 hover:text-slate-900 active:scale-95 cursor-pointer"
                 >
                   <Camera className="h-4 w-4 text-slate-500" />
                   <span>Launch Live Camera</span>
@@ -965,7 +1013,7 @@ export default function Scanner() {
                   type="button"
                   onClick={handleReset}
                   disabled={isScanning}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex items-center justify-center min-h-[44px] gap-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 cursor-pointer"
                   title="Retake or choose different photo"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -978,7 +1026,7 @@ export default function Scanner() {
                 <button
                   type="button"
                   onClick={handleRunOcrScan}
-                  className="w-full inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 py-3.5 px-6 text-sm font-bold text-white shadow-lg shadow-blue-500/25 transition hover:brightness-110 active:scale-98 cursor-pointer"
+                  className="w-full inline-flex items-center justify-center min-h-[44px] gap-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 py-3.5 px-6 text-sm font-bold text-white shadow-lg shadow-blue-500/25 transition hover:brightness-110 active:scale-98 cursor-pointer"
                 >
                   <Sparkles className="h-5 w-5" />
                   <span>Scan Package with Tesseract OCR</span>
@@ -1035,7 +1083,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={handleRetakePhoto}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 transition cursor-pointer active:scale-95"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-lg bg-rose-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 transition cursor-pointer active:scale-95"
                     >
                       <Camera className="h-3.5 w-3.5" />
                       <span>Try Again / Retake Photo</span>
@@ -1043,7 +1091,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={handleUploadNewPhoto}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer active:scale-95"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-lg border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer active:scale-95"
                     >
                       <UploadCloud className="h-3.5 w-3.5" />
                       <span>Upload Clearer Image</span>
@@ -1051,7 +1099,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={handleRunOcrScan}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 transition cursor-pointer"
                     >
                       <RefreshCw className="h-3 w-3" />
                       <span>Retry Scan</span>
@@ -1062,52 +1110,53 @@ export default function Scanner() {
 
               {/* State C: Ready to Scan Prompt */}
               {!analysisResult && !isScanning && !ocrError && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 space-y-4 shadow-xs">
                   <div className="flex items-center gap-2 text-slate-800">
-                    <ShieldCheck className="h-5 w-5 text-blue-600" />
-                    <h3 className="font-bold text-sm">Ready for Statutory 2011 Rules Audit</h3>
+                    <ShieldCheck className="h-5 w-5 text-blue-600 shrink-0" />
+                    <h3 className="font-bold text-sm sm:text-base">Ready for Statutory 2011 Rules Audit (7 Declarations)</h3>
                   </div>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Click <strong className="text-slate-800 font-semibold">"Scan Package with Tesseract OCR"</strong> to extract typography and audit against the 4 mandatory packaging declarations under the Legal Metrology (Packaged Commodities) Rules, 2011.
+                    Click <strong className="text-slate-800 font-semibold">"Scan Package with Tesseract OCR"</strong> to extract typography and audit against all 7 statutory packaging declarations under the Legal Metrology (Packaged Commodities) Rules, 2011.
                   </p>
 
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold text-slate-700">1. Rule 6(1)(e): MRP</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Maximum Retail Price incl. of all taxes
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold text-slate-700">2. Rule 6(1)(c): Net Qty</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Net Weight/Volume in standard metric units
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold text-slate-700">3. Rule 6(1)(d): Mfg Date</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Month & Year of Mfg/PKD and batch code
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold text-slate-700">4. Rule 6(1)(g): Customer Care</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Helpline, email, or grievance redressal
-                      </p>
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    {ALL_STATUTORY_RULES.map((rule) => (
+                      <div
+                        key={rule.id}
+                        className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 flex items-start justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[10px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                              {rule.ruleNo}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-800 truncate">
+                              {rule.label}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-snug line-clamp-2">
+                            {rule.description}
+                          </p>
+                        </div>
+                        <span className="shrink-0 inline-flex items-center rounded-full bg-slate-200/80 px-2 py-0.5 text-[9px] font-extrabold tracking-wider uppercase text-slate-600">
+                          PENDING
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* State D: REAL STRICT STATUTORY COMPLIANCE RESULTS */}
+              {/* State D: REAL STRICT STATUTORY COMPLIANCE RESULTS (3-MODE MATRIX) */}
               {analysisResult && (
                 <div className="space-y-4">
-                  {/* Strict Verdict Banner */}
+                  {/* 3-Mode Strict Verdict Banner */}
                   <div
                     className={`rounded-2xl border p-5 shadow-sm transition-all ${
-                      analysisResult.verdict === 'Compliant'
+                      analysisResult.complianceStatus === 'COMPLIANT' || analysisResult.verdict === 'Compliant'
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+                        : analysisResult.complianceStatus === 'MANUAL_REVIEW' || analysisResult.verdict === 'Manual Review'
+                        ? 'border-amber-200 bg-amber-50 text-amber-950'
                         : 'border-rose-300 bg-rose-50 text-rose-950'
                     }`}
                   >
@@ -1115,13 +1164,17 @@ export default function Scanner() {
                       <div className="flex items-start gap-3.5">
                         <div
                           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl font-bold text-white shadow-md ${
-                            analysisResult.verdict === 'Compliant'
+                            analysisResult.complianceStatus === 'COMPLIANT' || analysisResult.verdict === 'Compliant'
                               ? 'bg-emerald-600 shadow-emerald-600/30'
+                              : analysisResult.complianceStatus === 'MANUAL_REVIEW' || analysisResult.verdict === 'Manual Review'
+                              ? 'bg-amber-500 shadow-amber-500/30'
                               : 'bg-rose-600 shadow-rose-600/30'
                           }`}
                         >
-                          {analysisResult.verdict === 'Compliant' ? (
+                          {analysisResult.complianceStatus === 'COMPLIANT' || analysisResult.verdict === 'Compliant' ? (
                             <CircleCheck className="h-6 w-6" />
+                          ) : analysisResult.complianceStatus === 'MANUAL_REVIEW' || analysisResult.verdict === 'Manual Review' ? (
+                            <Clock className="h-6 w-6" />
                           ) : (
                             <CircleX className="h-6 w-6" />
                           )}
@@ -1129,7 +1182,12 @@ export default function Scanner() {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-base sm:text-lg font-black tracking-tight">
-                              Statutory Verdict: {analysisResult.verdict === 'Compliant' ? 'COMPLIANT (PASS)' : 'NON-COMPLIANT (FAIL)'}
+                              Statutory Verdict:{' '}
+                              {analysisResult.complianceStatus === 'COMPLIANT' || analysisResult.verdict === 'Compliant'
+                                ? 'COMPLIANT (PASS)'
+                                : analysisResult.complianceStatus === 'MANUAL_REVIEW' || analysisResult.verdict === 'Manual Review'
+                                ? 'MANUAL REVIEW (HOLD)'
+                                : 'NON-COMPLIANT (FAIL)'}
                             </h3>
                             <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ring-black/10">
                               OCR Confidence: {Math.round(analysisResult.confidence)}%
@@ -1143,6 +1201,26 @@ export default function Scanner() {
                     </div>
                   </div>
 
+                  {/* Auto-Calculated USP Callout if Rule 11 was missing */}
+                  {analysisResult.suggestedUsp && (
+                    <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 shadow-xs flex items-start gap-3">
+                      <Scale className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-950 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold uppercase tracking-wide">
+                            Rule 11 Unit Sale Price (USP) Auto-Calculated
+                          </span>
+                          <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-900">
+                            {analysisResult.suggestedUsp}
+                          </span>
+                        </div>
+                        <p className="text-amber-800 leading-relaxed">
+                          Rule 11 USP was missing from label, but TriNetra auto-computed suggested unit price from extracted MRP and Net Quantity. Routed to Manual Review for officer confirmation.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* DYNAMIC ERROR DETAILS: IF FAILED, PROMINENTLY SHOW EXACT MISSING FIELDS */}
                   {analysisResult.verdict === 'Non-Compliant' && analysisResult.missingFields.length > 0 && (
                     <div className="rounded-2xl border-2 border-rose-300 bg-rose-50/90 p-4.5 shadow-xs space-y-3">
@@ -1154,7 +1232,7 @@ export default function Scanner() {
                       </div>
 
                       <p className="text-xs text-rose-800 leading-relaxed font-semibold">
-                        Under Legal Metrology (Packaged Commodities) Rules, 2011, all 4 declarations are mandatory. The following {analysisResult.missingFields.length} field(s) were not detected:
+                        Under Legal Metrology (Packaged Commodities) Rules, 2011, mandatory declarations must be present. The following {analysisResult.missingFields.length} declaration(s) were missing or unverified:
                       </p>
 
                       {/* Pill Badges for Missing Fields */}
@@ -1186,15 +1264,21 @@ export default function Scanner() {
                     </div>
                   )}
 
-                  {/* 4 Mandatory Declarations Audit Breakdown */}
+                  {/* 7 Statutory Declarations Audit Breakdown */}
                   <div className="space-y-2.5">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                      Mandatory Packaging Declarations Audit (Rules, 2011)
-                    </h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Statutory Packaging Declarations Audit (7 Rules)
+                      </h4>
+                      <span className="text-[11px] font-bold text-slate-600">
+                        {analysisResult.rules.filter((r) => r.status === 'Compliant').length} / 7 Verified
+                      </span>
+                    </div>
 
                     <div className="grid grid-cols-1 gap-2.5">
                       {analysisResult.rules.map((rule) => {
                         const isPass = rule.status === 'Compliant';
+                        const isReview = rule.status === 'Manual Review';
 
                         return (
                           <div
@@ -1202,15 +1286,23 @@ export default function Scanner() {
                             className={`rounded-xl border p-3.5 shadow-xs transition ${
                               isPass
                                 ? 'border-slate-200 bg-white hover:border-slate-300'
+                                : isReview
+                                ? 'border-amber-200 bg-amber-50/40 hover:border-amber-300'
                                 : 'border-rose-200 bg-rose-50/40 hover:border-rose-300'
                             }`}
                           >
                             <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
-                                    isPass ? 'text-blue-600 bg-blue-50' : 'text-rose-700 bg-rose-100'
-                                  }`}>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span
+                                    className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                                      isPass
+                                        ? 'text-blue-600 bg-blue-50'
+                                        : isReview
+                                        ? 'text-amber-800 bg-amber-100'
+                                        : 'text-rose-700 bg-rose-100'
+                                    }`}
+                                  >
                                     {rule.ruleNo}
                                   </span>
                                   <span className="text-xs font-bold text-slate-900">
@@ -1222,30 +1314,39 @@ export default function Scanner() {
                                 </p>
                               </div>
 
+                              {/* Dynamic Badges: FOUND vs PENDING / MISSING */}
                               <span
-                                className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ring-1 ${
+                                className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ring-1 ${
                                   isPass
                                     ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20'
+                                    : isReview
+                                    ? 'bg-amber-100 text-amber-800 ring-amber-500/30'
                                     : 'bg-rose-600 text-white ring-rose-600/30'
                                 }`}
                               >
                                 {isPass ? (
                                   <CircleCheck className="h-3 w-3" />
+                                ) : isReview ? (
+                                  <Clock className="h-3 w-3" />
                                 ) : (
                                   <CircleX className="h-3 w-3" />
                                 )}
-                                <span>{isPass ? 'COMPLIANT' : 'NON-COMPLIANT'}</span>
+                                <span>{isPass ? 'FOUND' : isReview ? 'PENDING' : 'MISSING'}</span>
                               </span>
                             </div>
 
-                            {/* Extracted Snippet Quote */}
+                            {/* Clean isolated single-line evidence string */}
                             <div className="mt-2.5 rounded-lg border border-slate-100 bg-slate-50 p-2 text-[11px] font-mono text-slate-700">
                               <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                                Detected in Artwork:
+                                Single-Line Evidence String:
                               </span>
-                              <span className={`break-all font-semibold ${isPass ? 'text-slate-800' : 'text-rose-700'}`}>
+                              <p
+                                className={`truncate font-semibold ${
+                                  isPass ? 'text-slate-800' : isReview ? 'text-amber-900' : 'text-rose-700'
+                                }`}
+                              >
                                 {rule.extractedSnippet}
-                              </span>
+                              </p>
                             </div>
                           </div>
                         );
@@ -1364,7 +1465,7 @@ export default function Scanner() {
                         type="button"
                         onClick={handleSaveReport}
                         disabled={isSavingReport}
-                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-500/25 hover:brightness-110 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                        className="flex-1 inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3 px-5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-500/25 hover:brightness-110 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
                       >
                         {isSavingReport ? (
                           <>
@@ -1379,7 +1480,7 @@ export default function Scanner() {
                         )}
                       </button>
                     ) : (
-                      <div className="flex-1 flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+                      <div className="flex-1 flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-3 min-h-[44px]">
                         <div className="flex items-center gap-2">
                           <CircleCheck className="h-5 w-5 text-emerald-600" />
                           <span className="text-xs font-bold text-emerald-900">
@@ -1408,7 +1509,7 @@ export default function Scanner() {
                           },
                         })
                       }
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/80 py-3 px-4 text-xs font-bold uppercase tracking-wider text-blue-700 shadow-xs hover:bg-blue-100 transition active:scale-95 cursor-pointer"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-xl border border-blue-200 bg-blue-50/80 py-3 px-4 text-xs font-bold uppercase tracking-wider text-blue-700 shadow-xs hover:bg-blue-100 transition active:scale-95 cursor-pointer"
                     >
                       <ExternalLink className="h-4 w-4" />
                       <span>Verification Docket</span>
@@ -1417,7 +1518,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={handleDownloadAnalysisLog}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs hover:bg-slate-50 transition active:scale-95 cursor-pointer"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-xl border border-slate-300 bg-white py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs hover:bg-slate-50 transition active:scale-95 cursor-pointer"
                       title="Download text audit log"
                     >
                       <Download className="h-4 w-4 text-slate-500" />
@@ -1427,7 +1528,7 @@ export default function Scanner() {
                     <button
                       type="button"
                       onClick={handleReset}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 shadow-xs hover:bg-slate-100 transition active:scale-95 cursor-pointer"
+                      className="inline-flex items-center justify-center min-h-[44px] gap-1.5 rounded-xl border border-slate-300 bg-slate-50 py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 shadow-xs hover:bg-slate-100 transition active:scale-95 cursor-pointer"
                     >
                       <RefreshCw className="h-4 w-4" />
                       <span>New Scan</span>
@@ -1476,7 +1577,7 @@ export default function Scanner() {
               <button
                 type="button"
                 onClick={handleRetakePhoto}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition cursor-pointer active:scale-95"
+                className="w-full inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition cursor-pointer active:scale-95"
               >
                 <Camera className="h-4 w-4" />
                 <span>Try Again / Retake Photo</span>
@@ -1485,7 +1586,7 @@ export default function Scanner() {
               <button
                 type="button"
                 onClick={handleUploadNewPhoto}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold py-2.5 px-4 text-xs uppercase tracking-wider transition cursor-pointer active:scale-95"
+                className="w-full inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold py-2.5 px-4 text-xs uppercase tracking-wider transition cursor-pointer active:scale-95"
               >
                 <UploadCloud className="h-4 w-4 text-slate-500" />
                 <span>Upload Different Image</span>

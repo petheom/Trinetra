@@ -201,7 +201,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         </header>
 
         {/* Dynamic Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-20 md:pb-8">
           <div key={location.pathname} className="max-w-7xl mx-auto w-full animate-fade-in">
             {children ?? <Outlet />}
           </div>

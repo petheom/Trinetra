@@ -36,7 +36,10 @@ export interface InspectionReport {
   officerId: string;
   region: string;
   location: string;
-  verdict: 'Compliant' | 'Non-Compliant' | 'Manual Review';
+  verdict: 'Compliant' | 'Non-Compliant' | 'Manual Review' | 'COMPLIANT' | 'NON_COMPLIANT' | 'MANUAL_REVIEW';
+  complianceStatus?: 'COMPLIANT' | 'NON_COMPLIANT' | 'MANUAL_REVIEW';
+  rawOcrText?: string;
+  reanalysisCount?: number;
   violations?: string[];
   missingFields?: string[];
   reasonsForFailure?: string[];
@@ -44,6 +47,8 @@ export interface InspectionReport {
   ocrConfidence: string;
   imageUrl?: string | null;
   pdfDocumentUrl?: string | null;
+  suggestedUsp?: string | null;
+  autoCalculatedUsp?: string | null;
   createdAt?: string;
 }
 

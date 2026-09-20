@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { analyzeProductImage } from '../controllers/scannerController.js';
+import { analyzeProductImage, reanalyzeProductImage } from '../controllers/scannerController.js';
 
 const router = express.Router();
 
@@ -21,5 +21,8 @@ const upload = multer({
 
 // POST /api/scanner/analyze - Accepts multipart file 'image' or JSON { image: 'base64...' }
 router.post('/analyze', upload.single('image'), analyzeProductImage);
+
+// POST /api/scanner/reanalyze - Re-analyze with Sharp contrast & crop coordinates
+router.post('/reanalyze', upload.single('image'), reanalyzeProductImage);
 
 export default router;

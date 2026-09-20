@@ -4,6 +4,7 @@ import { TriNetraProvider, useTriNetra, type UserRole } from './context/TriNetra
 
 import ErrorBoundary from './components/ErrorBoundary';
 import AdminLayout from './layouts/AdminLayout';
+import BottomNav from './components/BottomNav';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
@@ -103,7 +104,12 @@ function ProtectedLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  return <AdminLayout />;
+  return (
+    <div className="relative min-h-screen flex flex-col pb-20 md:pb-0">
+      <AdminLayout />
+      <BottomNav />
+    </div>
+  );
 }
 
 // 5. RoleProtectedRoute: restricts officer vs admin paths safely

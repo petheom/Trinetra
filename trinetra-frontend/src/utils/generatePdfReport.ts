@@ -407,7 +407,7 @@ export function generateSavedReportPdf(report: {
   officerId: string;
   region?: string;
   location: string;
-  verdict: 'Compliant' | 'Non-Compliant' | 'Manual Review';
+  verdict: 'Compliant' | 'Non-Compliant' | 'Manual Review' | 'COMPLIANT' | 'NON_COMPLIANT' | 'MANUAL_REVIEW';
   violations?: string[];
   findings: string;
   ocrConfidence: string;
@@ -514,7 +514,7 @@ export function generateSavedReportPdf(report: {
     y += 28;
 
     // Verdict Banner
-    const isCompliant = report.verdict === 'Compliant';
+    const isCompliant = report.verdict === 'Compliant' || report.verdict === 'COMPLIANT';
 
     if (isCompliant) {
       doc.setFillColor(236, 253, 245);

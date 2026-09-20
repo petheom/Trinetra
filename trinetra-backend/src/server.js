@@ -9,6 +9,14 @@ import scannerRoutes from './routes/scannerRoutes.js';
 import debugRoutes from './routes/debugRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
+import cors from 'cors';
+
+// Allow requests from all local devices during development
+app.use(cors({
+  origin: '*',
+  credentials: true,
+}));
+
 
 // Load environment variables
 dotenv.config();

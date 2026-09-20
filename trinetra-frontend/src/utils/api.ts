@@ -144,6 +144,11 @@ export const mapBackendReportToFrontend = (r: any): InspectionReport => {
     violations: Array.isArray(r.violations) ? r.violations : [],
     missingFields: Array.isArray(r.missingFields) ? r.missingFields : [],
     reasonsForFailure: Array.isArray(r.reasonsForFailure) ? r.reasonsForFailure : [],
+    complianceStatus: r.complianceStatus,
+    rawOcrText: r.rawOcrText || r.extractedText || '',
+    reanalysisCount: r.reanalysisCount || 0,
+    suggestedUsp: r.suggestedUsp || null,
+    autoCalculatedUsp: r.autoCalculatedUsp || r.suggestedUsp || null,
     findings:
       r.findings ||
       r.remarks ||
@@ -273,6 +278,15 @@ export interface ScannerApiResponse {
   };
 }
 
+export interface ReanalyzePayload {
+  image?: string;
+  contrast?: number;
+  sharpen?: boolean;
+  threshold?: number;
+  crop?: { left: number; top: number; width: number; height: number };
+  reanalysisCount?: number;
+}
+
 export const scannerAPI = {
   /**
    * Analyze uploaded image file or base64 using server-side Tesseract.js & 2011 Rules Engine
@@ -292,6 +306,20 @@ export const scannerAPI = {
     });
     return response.data;
   },
+
+  /**
+   * Re-analyze image with Sharp contrast enhancement and optional crop coordinates
+   */
+  reanalyzeImage: async (payload: ReanalyzePayload | FormData) => {
+    if (payload instanceof FormData) {
+      const response = await api.post('/api/scanner/reanalyze', payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return response.data;
+    }
+    const response = await api.post('/api/scanner/reanalyze', payload);
+    return response.data;
+  },
 };
 
 // -------------------------------------------------------------
@@ -299,7 +327,10 @@ export const scannerAPI = {
 // -------------------------------------------------------------
 export interface CreateInspectionPayload {
   extractedText: string;
-  verdict: 'Compliant' | 'Non-Compliant';
+  rawOcrText?: string;
+  verdict?: 'Compliant' | 'Non-Compliant' | 'Manual Review' | 'COMPLIANT' | 'NON_COMPLIANT' | 'MANUAL_REVIEW';
+  complianceStatus?: 'COMPLIANT' | 'NON_COMPLIANT' | 'MANUAL_REVIEW';
+  reanalysisCount?: number;
   missingFields?: string[];
   reasonsForFailure?: string[];
   productName?: string;
@@ -310,6 +341,8 @@ export interface CreateInspectionPayload {
   ocrConfidence?: string;
   findings?: string;
   violations?: string[];
+  suggestedUsp?: string | null;
+  autoCalculatedUsp?: string | null;
   location?: string;
   region?: string;
 }

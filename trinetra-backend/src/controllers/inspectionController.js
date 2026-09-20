@@ -35,17 +35,48 @@ export const createInspection = async (req, res, next) => {
       });
     }
 
-    if (!verdict || !['Compliant', 'Non-Compliant', 'Manual Review'].includes(verdict)) {
+    const rawVerdict = verdict || req.body.complianceStatus;
+    const validVerdicts = ['Compliant', 'Non-Compliant', 'Manual Review', 'COMPLIANT', 'NON_COMPLIANT', 'MANUAL_REVIEW'];
+
+    if (!rawVerdict || !validVerdicts.includes(rawVerdict)) {
       return res.status(400).json({
         success: false,
-        message: "A valid statutory verdict ('Compliant', 'Non-Compliant', or 'Manual Review') is required",
+        message: "A valid statutory verdict or complianceStatus ('Compliant', 'Non-Compliant', 'Manual Review', 'COMPLIANT', 'NON_COMPLIANT', 'MANUAL_REVIEW') is required",
       });
     }
 
+    // Normalize verdict string to standard title case
+    let normalizedVerdict = rawVerdict;
+    if (rawVerdict === 'COMPLIANT') normalizedVerdict = 'Compliant';
+    else if (rawVerdict === 'NON_COMPLIANT') normalizedVerdict = 'Non-Compliant';
+    else if (rawVerdict === 'MANUAL_REVIEW') normalizedVerdict = 'Manual Review';
+
     // 2. Strict 2011 Rules Consistency Guard:
-    // If any mandatory field is missing, verdict must be strictly Non-Compliant
+    // If any mandatory field is missing, verdict must be strictly Non-Compliant.
+    // If only Rule 11 (Unit Sale Price) is missing, route to Manual Review instead of Non-Compliant.
     const normalizedMissing = Array.isArray(missingFields) ? missingFields : [];
-    const finalVerdict = normalizedMissing.length > 0 ? 'Non-Compliant' : verdict;
+    const isOnlyUspMissing =
+      normalizedMissing.length === 1 &&
+      (normalizedMissing[0].toLowerCase().includes('unit sale price') ||
+        normalizedMissing[0].toLowerCase().includes('usp') ||
+        normalizedMissing[0].toLowerCase().includes('rule 11'));
+
+    let finalVerdict = normalizedVerdict;
+    if (normalizedMissing.length > 0) {
+      if (isOnlyUspMissing && (normalizedVerdict === 'Manual Review' || req.body.complianceStatus === 'MANUAL_REVIEW')) {
+        finalVerdict = 'Manual Review';
+      } else {
+        finalVerdict = 'Non-Compliant';
+      }
+    }
+
+    const complianceStatus =
+      req.body.complianceStatus ||
+      (finalVerdict === 'Compliant'
+        ? 'COMPLIANT'
+        : finalVerdict === 'Non-Compliant'
+        ? 'NON_COMPLIANT'
+        : 'MANUAL_REVIEW');
 
     // 3. Automatically link to authenticated Officer credentials from JWT
     const officerId = req.user?.badgeId || req.user?.username || 'UNKNOWN-OFFICER';
@@ -65,14 +96,18 @@ export const createInspection = async (req, res, next) => {
       brand: brand || 'Domestic Manufacturer',
       category: category || 'Food & Beverages',
       extractedText: String(extractedText).trim(),
+      rawOcrText: req.body.rawOcrText || String(extractedText).trim(),
       missingFields: normalizedMissing,
       reasonsForFailure: Array.isArray(reasonsForFailure) ? reasonsForFailure : [],
       verdict: finalVerdict,
+      complianceStatus,
+      reanalysisCount: Number(req.body.reanalysisCount) || 0,
       pdfDocumentUrl: pdfDocumentUrl || pdfUrl || null,
       imageUrl: imageUrl || null,
       ocrConfidence: ocrConfidence ? String(ocrConfidence) : '95%',
       findings: findings || '',
       violations: Array.isArray(violations) ? violations : [],
+      suggestedUsp: req.body.suggestedUsp || req.body.autoCalculatedUsp || null,
     });
 
     return res.status(201).json({

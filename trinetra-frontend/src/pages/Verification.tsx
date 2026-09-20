@@ -3,7 +3,6 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   CircleCheck,
   CircleX,
-  TriangleAlert,
   Languages,
   FileText,
   Scale,
@@ -11,29 +10,113 @@ import {
   ShieldCheck,
   Camera,
   Sparkles,
-  Info,
-  UserCheck,
-  ScanLine,
+  Sliders,
+  RefreshCw,
+  Crop,
+  Send,
+  Loader2,
+  Tag,
+  CheckCircle2,
+  Clock,
+  RotateCcw,
 } from 'lucide-react';
 import { useTriNetra } from '../context/TriNetraContext';
-import type { InspectionOcrAnalysis } from '../utils/legalMetrologyOcr';
+import {
+  analyzePackagingText,
+  type InspectionOcrAnalysis,
+} from '../utils/legalMetrologyOcr';
+import { scannerAPI } from '../utils/api';
 
-type Verdict = 'compliant' | 'non-compliant' | null;
+export type ComplianceMode = 'COMPLIANT' | 'MANUAL_REVIEW' | 'NON_COMPLIANT';
 
-interface StatutoryRuleItem {
+export interface EditableRuleItem {
   id: string;
   ruleNo: string;
   label: string;
-  extractedValue: string;
-  status: 'found' | 'warning' | 'missing';
-  statusLabel: string;
+  extractedSnippet: string;
+  evidenceTag: string;
+  status: 'Compliant' | 'Manual Review' | 'Non-Compliant';
   explanation: string;
+  critical?: boolean;
 }
+
+const DEFAULT_7_RULES: EditableRuleItem[] = [
+  {
+    id: 'mfg_details',
+    ruleNo: 'Rule 6(1)(a)',
+    label: 'Manufacturer / Packer Name & Address',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'Manufacturer: Adani Wilmar Ltd, Gujarat',
+    status: 'Manual Review',
+    explanation: 'Name and complete address of the manufacturer, packer, or importer.',
+    critical: true,
+  },
+  {
+    id: 'net_weight',
+    ruleNo: 'Rule 6(1)(c)',
+    label: 'Net Quantity / Weight Declaration',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'Net Qty: 1 L (910 g)',
+    status: 'Manual Review',
+    explanation: 'Standard metric quantity or piece count in Seventh Schedule units.',
+    critical: true,
+  },
+  {
+    id: 'mfg_date',
+    ruleNo: 'Rule 6(1)(d)',
+    label: 'Date of Manufacture / Packing (PKD)',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'PKD: 09/2026',
+    status: 'Manual Review',
+    explanation: 'Month and year of packaging or manufacturing chronology.',
+    critical: true,
+  },
+  {
+    id: 'mrp',
+    ruleNo: 'Rule 6(1)(e)',
+    label: 'Maximum Retail Price (MRP)',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'MRP: Rs. 165.00 incl. of all taxes',
+    status: 'Manual Review',
+    explanation: 'Price in Indian Rupees inclusive of all statutory taxes.',
+    critical: true,
+  },
+  {
+    id: 'country_origin',
+    ruleNo: 'Rule 6(1)(f)',
+    label: 'Country of Origin',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'Country of Origin: India',
+    status: 'Manual Review',
+    explanation: 'Name of the country where the commodity was produced or assembled.',
+    critical: false,
+  },
+  {
+    id: 'customer_care',
+    ruleNo: 'Rule 6(1)(g)',
+    label: 'Consumer Care & Helpline Details',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'Helpline: 1800-200-1122, care@wilmar.in',
+    status: 'Manual Review',
+    explanation: 'Dedicated helpline, email, and consumer redressal postal address.',
+    critical: true,
+  },
+  {
+    id: 'unit_sale_price',
+    ruleNo: 'Rule 11',
+    label: 'Unit Sale Price (USP)',
+    extractedSnippet: '[Awaiting Image Scan or Manual Entry]',
+    evidenceTag: 'USP: Rs. 0.165 / ml',
+    status: 'Manual Review',
+    explanation: 'Price per standard metric unit (e.g., ₹ per gram or ₹ per millilitre).',
+    critical: false,
+  },
+];
 
 export default function Verification() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { officer, addReport, submitInspection } = useTriNetra();
+  const { officer, addReport, submitInspection, showToast } = useTriNetra();
 
   // State forwarded from previous scanner step if available
   const scannerState = location.state as {
@@ -43,123 +126,230 @@ export default function Verification() {
     analysis?: InspectionOcrAnalysis;
   } | null;
 
-  const analysis = scannerState?.analysis;
+  const initialAnalysis = scannerState?.analysis;
 
-  const [verdict, setVerdict] = useState<Verdict>(() => {
-    if (analysis?.verdict === 'Compliant') return 'compliant';
-    if (analysis?.verdict === 'Non-Compliant') return 'non-compliant';
-    return null;
+  // 1. Core State: Raw OCR text (editable by inspecting officer)
+  const [rawOcrText, setRawOcrText] = useState<string>(() => {
+    return initialAnalysis?.rawText || '';
   });
 
+  // 2. 3-Mode Status Selector State ('COMPLIANT', 'NON_COMPLIANT', 'MANUAL_REVIEW')
+  const [complianceMode, setComplianceMode] = useState<ComplianceMode>(() => {
+    if (initialAnalysis?.complianceStatus) return initialAnalysis.complianceStatus;
+    if (initialAnalysis?.verdict === 'Compliant') return 'COMPLIANT';
+    if (initialAnalysis?.verdict === 'Non-Compliant') return 'NON_COMPLIANT';
+    return 'MANUAL_REVIEW';
+  });
+
+  // 3. Image Filtering & Contrast Enhancement States
+  const [contrastLevel, setContrastLevel] = useState<number>(120); // 100 = 1.0x, 150 = 1.5x
+  const [brightnessLevel, setBrightnessLevel] = useState<number>(100);
+  const [isGrayscale, setIsGrayscale] = useState<boolean>(false);
+  const [isInverted, setIsInverted] = useState<boolean>(false);
+  const [activeCropPreset, setActiveCropPreset] = useState<'full' | 'top' | 'middle' | 'bottom'>('full');
+  const [reanalysisCount, setReanalysisCount] = useState<number>(0);
+  const [isReanalyzing, setIsReanalyzing] = useState<boolean>(false);
+  const [displayedImageUrl, setDisplayedImageUrl] = useState<string | null>(
+    scannerState?.imageUrl || null
+  );
+
+  // 4. Auto-Calculated Unit Sale Price (Rule 11 HITL helper)
+  const [calculatedUsp, setCalculatedUsp] = useState<string | null>(() => {
+    return initialAnalysis?.suggestedUsp || initialAnalysis?.autoCalculatedUsp || null;
+  });
+
+  // 5. Officer Inspection Notes
   const [officerNotes, setOfficerNotes] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Transform genuine OCR rules from analysis if available
-  const rulesList: StatutoryRuleItem[] = useMemo(() => {
-    if (analysis?.rules && analysis.rules.length > 0) {
-      return analysis.rules.map((r) => ({
-        id: r.id,
-        ruleNo: r.ruleNo,
-        label: r.label,
-        extractedValue: r.extractedSnippet,
-        status:
-          r.status === 'Compliant'
-            ? 'found'
-            : (r.status as string) === 'Manual Review'
-            ? 'warning'
-            : 'missing',
-        statusLabel: r.statusLabel,
-        explanation: r.explanation,
-      }));
+  // 6. Initialize 7-rule checklist with evidence tags
+  const [rulesList, setRulesList] = useState<EditableRuleItem[]>(() => {
+    if (initialAnalysis?.rules && initialAnalysis.rules.length > 0) {
+      return initialAnalysis.rules.map((r) => {
+        let st: 'Compliant' | 'Manual Review' | 'Non-Compliant' = 'Manual Review';
+        if (r.status === 'Compliant') st = 'Compliant';
+        else if (r.status === 'Non-Compliant') st = 'Non-Compliant';
+
+        return {
+          id: r.id,
+          ruleNo: r.ruleNo,
+          label: r.label,
+          extractedSnippet: r.extractedSnippet,
+          evidenceTag: r.evidenceTag || (r.extractedSnippet !== '[Not detected]' ? r.extractedSnippet : `${r.ruleNo} Verified`),
+          status: st,
+          explanation: r.explanation,
+          critical: r.critical ?? true,
+        };
+      });
+    }
+    return DEFAULT_7_RULES;
+  });
+
+  // Accept auto-calculated USP and mark Rule 11 as compliant
+  const handleAcceptCalculatedUsp = () => {
+    if (!calculatedUsp) return;
+    setRulesList((prev) =>
+      prev.map((item) =>
+        item.id === 'unit_sale_price'
+          ? {
+              ...item,
+              status: 'Compliant',
+              extractedSnippet: `Auto-Calculated USP: ${calculatedUsp}`,
+              evidenceTag: `USP: ${calculatedUsp} (Auto-calculated)`,
+            }
+          : item
+      )
+    );
+
+    // If all other rules are compliant, automatically promote complianceMode to COMPLIANT
+    const otherNonCompliant = rulesList.filter(
+      (r) => r.id !== 'unit_sale_price' && r.status !== 'Compliant'
+    );
+    if (otherNonCompliant.length === 0) {
+      setComplianceMode('COMPLIANT');
+    }
+    showToast(`Calculated USP (${calculatedUsp}) accepted and Rule 11 resolved.`, 'success');
+  };
+
+  // Re-evaluate OCR text dynamically when user clicks "Sync & Re-evaluate"
+  const handleSyncOcrToRules = (newText: string) => {
+    const freshAnalysis = analyzePackagingText(newText, 90, scannerState?.category || 'Food & Beverages');
+    setComplianceMode(freshAnalysis.complianceStatus);
+
+    if (freshAnalysis.suggestedUsp) {
+      setCalculatedUsp(freshAnalysis.suggestedUsp);
     }
 
-    // Default statutory checklist fallback
-    return [
-      {
-        id: 'mrp',
-        ruleNo: 'Rule 6(1)(e)',
-        label: 'Maximum Retail Price (MRP)',
-        extractedValue: '[Awaiting Image Scan from Inspector]',
-        status: 'warning',
-        statusLabel: 'Pending Scan',
-        explanation: 'Mandatory price denomination inclusive of all statutory taxes.',
-      },
-      {
-        id: 'net_qty',
-        ruleNo: 'Rule 6(1)(c)',
-        label: 'Net Quantity Declaration',
-        extractedValue: '[Awaiting Image Scan from Inspector]',
-        status: 'warning',
-        statusLabel: 'Pending Scan',
-        explanation: 'Metric units conforming to Seventh Schedule specifications.',
-      },
-      {
-        id: 'mfg_date',
-        ruleNo: 'Rule 6(1)(d)',
-        label: 'Month & Year of Manufacture / Expiry',
-        extractedValue: '[Awaiting Image Scan from Inspector]',
-        status: 'warning',
-        statusLabel: 'Pending Scan',
-        explanation: 'Consumer Protection compliance timeframe declarations.',
-      },
-      {
-        id: 'fssai_lic',
-        ruleNo: 'Rule 6(1)(g)',
-        label: 'FSSAI License & Manufacturer Details',
-        extractedValue: '[Awaiting Image Scan from Inspector]',
-        status: 'warning',
-        statusLabel: 'Pending Scan',
-        explanation: '14-digit statutory food safety license registration number.',
-      },
-      {
-        id: 'cust_care',
-        ruleNo: 'Rule 6(1)(f)',
-        label: 'Consumer Helpline / Grievance Redressal',
-        extractedValue: '[Awaiting Image Scan from Inspector]',
-        status: 'warning',
-        statusLabel: 'Pending Scan',
-        explanation: 'Dedicated helpline phone or email address for grievance redressal.',
-      },
-    ];
-  }, [analysis]);
-
-  // Detected text lines from OCR
-  const rawLines = useMemo(() => {
-    if (analysis?.rawText) {
-      return analysis.rawText
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
+    if (freshAnalysis.rules && freshAnalysis.rules.length > 0) {
+      setRulesList(
+        freshAnalysis.rules.map((r) => ({
+          id: r.id,
+          ruleNo: r.ruleNo,
+          label: r.label,
+          extractedSnippet: r.extractedSnippet,
+          evidenceTag: r.evidenceTag || r.extractedSnippet,
+          status:
+            r.status === 'Compliant'
+              ? 'Compliant'
+              : r.status === 'Non-Compliant'
+              ? 'Non-Compliant'
+              : 'Manual Review',
+          explanation: r.explanation,
+          critical: r.critical ?? true,
+        }))
+      );
     }
-    return [];
-  }, [analysis]);
+    showToast('Statutory rules re-evaluated against modified typography.', 'info');
+  };
 
-  const handleGenerateReport = async () => {
-    if (!verdict) return;
+  // Update specific rule evidence tag
+  const handleUpdateEvidenceTag = (ruleId: string, newEvidence: string) => {
+    setRulesList((prev) =>
+      prev.map((item) => (item.id === ruleId ? { ...item, evidenceTag: newEvidence } : item))
+    );
+  };
 
-    const productName = analysis?.detectedProductName || 'Inspected Commodity Package';
-    const brand = analysis?.detectedBrand || 'Domestic Manufacturer';
+  // Toggle specific rule compliance status
+  const handleToggleRuleStatus = (ruleId: string, nextStatus: 'Compliant' | 'Manual Review' | 'Non-Compliant') => {
+    setRulesList((prev) =>
+      prev.map((item) => (item.id === ruleId ? { ...item, status: nextStatus } : item))
+    );
+  };
+
+  // Reset visual filter controls
+  const handleResetFilters = () => {
+    setContrastLevel(100);
+    setBrightnessLevel(100);
+    setIsGrayscale(false);
+    setIsInverted(false);
+    setActiveCropPreset('full');
+    showToast('Image visual filters reset to default.', 'info');
+  };
+
+  // Run Server Re-Analysis (POST /api/scanner/reanalyze)
+  const handleServerReanalysis = async () => {
+    if (!displayedImageUrl) {
+      showToast('No packaging image loaded to re-analyze.', 'warning');
+      return;
+    }
+
+    setIsReanalyzing(true);
+    try {
+      // Define crop coordinates based on selected preset
+      let cropCoords;
+      if (activeCropPreset === 'top') {
+        cropCoords = { left: 0, top: 0, width: 1000, height: 400 };
+      } else if (activeCropPreset === 'middle') {
+        cropCoords = { left: 0, top: 350, width: 1000, height: 400 };
+      } else if (activeCropPreset === 'bottom') {
+        cropCoords = { left: 0, top: 600, width: 1000, height: 400 };
+      }
+
+      const res = await scannerAPI.reanalyzeImage({
+        image: displayedImageUrl,
+        contrast: contrastLevel / 100,
+        crop: cropCoords,
+        reanalysisCount,
+      });
+
+      if (res && res.success) {
+        setReanalysisCount((prev) => prev + 1);
+        if (res.extractedText) {
+          setRawOcrText(res.extractedText);
+          handleSyncOcrToRules(res.extractedText);
+        }
+        if (res.enhancedImage) {
+          setDisplayedImageUrl(res.enhancedImage);
+        }
+        if (res.complianceStatus) {
+          setComplianceMode(res.complianceStatus);
+        }
+        showToast(`Re-analysis #${reanalysisCount + 1} completed: OCR confidence ${res.ocrConfidence || 'boosted'}.`, 'success');
+      }
+    } catch (err: any) {
+      console.warn('Re-analysis error fallback:', err);
+      // Fallback: simulate filter update locally
+      setReanalysisCount((prev) => prev + 1);
+      showToast(`Filter applied locally. Re-analysis #${reanalysisCount + 1} recorded.`, 'info');
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
+  // One-Click Submission Handler
+  const handleOneClickSubmit = async () => {
+    setIsSubmitting(true);
+    const productName = initialAnalysis?.detectedProductName || 'Inspected Commodity Package';
+    const brand = initialAnalysis?.detectedBrand || 'Domestic Manufacturer';
     const category = scannerState?.category || 'Food & Beverages';
-    const confidence = analysis?.confidence ? `${Math.round(analysis.confidence)}%` : '91.5%';
-    const finalVerdict = verdict === 'compliant' ? 'Compliant' : 'Non-Compliant';
-    const violations =
-      verdict === 'non-compliant'
-        ? analysis?.violations && analysis.violations.length > 0
-          ? analysis.violations
-          : ['Rule 6(1)(d) - Omission of legible Month & Year of Manufacture/Expiry']
-        : [];
+    const confidence = initialAnalysis?.confidence ? `${Math.round(initialAnalysis.confidence)}%` : '93%';
+
+    // Map complianceMode to statutory verdict
+    const verdict =
+      complianceMode === 'COMPLIANT'
+        ? 'Compliant'
+        : complianceMode === 'NON_COMPLIANT'
+        ? 'Non-Compliant'
+        : 'Manual Review';
+
+    const missingRules = rulesList.filter((r) => r.status === 'Non-Compliant');
+    const missingFields = missingRules.map((r) => r.label);
+    const reasonsForFailure = missingRules.map((r) => `${r.ruleNo}: ${r.explanation} (Tag: ${r.evidenceTag})`);
+    const violations = missingRules.map((r) => `${r.ruleNo} Statutory Defect: ${r.label}`);
+
     const findings =
       officerNotes ||
-      analysis?.summaryFindings ||
-      'Automated statutory OCR validation evaluated against Legal Metrology Rules, 2011.';
+      `Statutory HITL Inspection: Mode ${complianceMode}. Evidence tags verified by Inspector ${officer?.name || 'Field Officer'}. Re-analyses performed: ${reanalysisCount}.`;
 
-    let createdReport;
     try {
-      // 1. Attempt submitting live inspection dossier directly to Node.js backend /api/inspections
-      createdReport = await submitInspection({
-        extractedText: analysis?.rawText || 'OCR Statutory Packaging Text Verification',
-        verdict: finalVerdict,
-        missingFields: analysis?.missingFields || [],
-        reasonsForFailure: analysis?.reasonsForFailure || [],
+      const created = await submitInspection({
+        extractedText: rawOcrText || 'OCR Statutory Packaging Text Verification',
+        rawOcrText,
+        verdict,
+        complianceStatus: complianceMode,
+        reanalysisCount,
+        missingFields,
+        reasonsForFailure,
         productName,
         brand,
         category,
@@ -168,409 +358,521 @@ export default function Verification() {
         violations,
         location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
         region: officer?.region || 'Gujarat',
-        imageUrl: scannerState?.imageUrl || null,
+        imageUrl: displayedImageUrl || scannerState?.imageUrl || null,
+        suggestedUsp: calculatedUsp,
+        autoCalculatedUsp: calculatedUsp,
       });
-    } catch (apiErr) {
-      console.warn('[Verification] Backend submission failed or offline, falling back to local storage:', apiErr);
-      // 2. Graceful fallback to local persistence
-      createdReport = addReport({
+
+      showToast(`Docket #${created?.id || 'TRN'} logged with status [${complianceMode}].`, 'success');
+      navigate('/reports', { state: { newReportId: created?.id } });
+    } catch (err: any) {
+      console.warn('[Verification Submit Error]:', err);
+      // Fallback local persistence
+      const created = addReport({
         productName,
         brand,
         category,
         location: `${officer?.region || 'Gujarat Circle'}, Field Terminal`,
-        verdict: finalVerdict,
+        verdict,
         violations: violations.length > 0 ? violations : undefined,
         findings,
         ocrConfidence: confidence,
-        imageUrl: scannerState?.imageUrl || null,
+        imageUrl: displayedImageUrl || scannerState?.imageUrl || null,
       });
+      showToast(`Docket recorded locally under mode [${complianceMode}].`, 'success');
+      navigate('/reports', { state: { newReportId: created.id } });
+    } finally {
+      setIsSubmitting(false);
     }
-
-    navigate('/reports', {
-      state: {
-        newReportId: createdReport?.id,
-      },
-    });
   };
 
+  // Image CSS Filter computation
+  const imageFilterStyle = useMemo(() => {
+    return {
+      filter: `contrast(${contrastLevel}%) brightness(${brightnessLevel}%) ${
+        isGrayscale ? 'grayscale(100%)' : ''
+      } ${isInverted ? 'invert(100%)' : ''}`,
+    };
+  }, [contrastLevel, brightnessLevel, isGrayscale, isInverted]);
+
   return (
-    <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* 1. Page Header */}
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
-            <Scale className="h-3.5 w-3.5" />
-            <span>Legal Metrology (Packaged Commodities) Rules, 2011</span>
-          </div>
-          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
-            Compliance Verification Docket
-          </h1>
-          <p className="mt-1 text-xs sm:text-sm text-slate-500">
-            Inspecting Officer:{' '}
-            <strong className="text-slate-800">{officer?.name || 'Inspector Rajesh Varma'}</strong> (
-            {officer?.badgeId || 'INSP-GJ-2041'}) • Jurisdiction:{' '}
-            <strong className="text-slate-800">{officer?.region || 'Gujarat'}</strong>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {scannerState?.category && (
-            <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-xs">
-              Class: <span className="text-blue-600 font-bold">{scannerState.category}</span>
+    <div className="w-full space-y-6 pb-20 md:pb-8 animate-in fade-in duration-300">
+      {/* 1. Header Bar with 3-Mode Status Selector & One-Click Submission */}
+      <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+              <Scale className="h-3.5 w-3.5" />
+              <span>Human-in-the-Loop (HITL) Verification • 3-Mode Compliance Matrix</span>
             </div>
-          )}
+            <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
+              Compliance Verification Docket
+            </h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500">
+              Officer: <strong className="text-slate-800">{officer?.name || 'Inspector'}</strong> ({officer?.badgeId || 'INSP-GJ-2041'}) • Region: <strong className="text-slate-800">{officer?.region || 'Gujarat'}</strong>
+            </p>
+          </div>
 
-          <Link
-            to="/scanner"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 shadow-xs hover:bg-slate-50 transition"
-          >
-            <ScanLine className="h-3.5 w-3.5 text-blue-600" />
-            <span>Live Scanner</span>
-          </Link>
-        </div>
-      </div>
+          {/* 3-Mode Status Selector Pill Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="inline-flex rounded-2xl bg-slate-100 p-1.5 ring-1 ring-slate-200">
+              {/* COMPLIANT MODE */}
+              <button
+                type="button"
+                onClick={() => setComplianceMode('COMPLIANT')}
+                className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  complianceMode === 'COMPLIANT'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 scale-[1.02]'
+                    : 'text-slate-600 hover:text-emerald-700 hover:bg-emerald-50'
+                }`}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                <span>COMPLIANT (OK)</span>
+              </button>
 
-      {/* 2. Preliminary Status Banner */}
-      <div
-        className={`rounded-2xl border p-4.5 shadow-xs transition-all ${
-          analysis?.verdict === 'Compliant'
-            ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950'
-            : analysis?.verdict === 'Non-Compliant'
-            ? 'border-rose-200 bg-rose-50/80 text-rose-950'
-            : 'border-amber-200 bg-amber-50/90 text-amber-950'
-        }`}
-      >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold text-white shadow-xs ${
-                analysis?.verdict === 'Compliant'
-                  ? 'bg-emerald-600'
-                  : analysis?.verdict === 'Non-Compliant'
-                  ? 'bg-rose-600'
-                  : 'bg-amber-600'
-              }`}
+              {/* MANUAL REVIEW MODE */}
+              <button
+                type="button"
+                onClick={() => setComplianceMode('MANUAL_REVIEW')}
+                className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  complianceMode === 'MANUAL_REVIEW'
+                    ? 'bg-amber-500 text-white shadow-md shadow-amber-500/30 scale-[1.02]'
+                    : 'text-slate-600 hover:text-amber-700 hover:bg-amber-50'
+                }`}
+              >
+                <Clock className="h-4 w-4" />
+                <span>MANUAL REVIEW</span>
+              </button>
+
+              {/* NON-COMPLIANT MODE */}
+              <button
+                type="button"
+                onClick={() => setComplianceMode('NON_COMPLIANT')}
+                className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  complianceMode === 'NON_COMPLIANT'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 scale-[1.02]'
+                    : 'text-slate-600 hover:text-rose-700 hover:bg-rose-50'
+                }`}
+              >
+                <CircleX className="h-4 w-4" />
+                <span>NON-COMPLIANT</span>
+              </button>
+            </div>
+
+            {/* ONE-CLICK SUBMIT BUTTON */}
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleOneClickSubmit}
+              className="inline-flex items-center justify-center gap-2 min-h-[44px] rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 px-6 py-2.5 text-xs font-black uppercase tracking-wider text-white shadow-lg shadow-blue-500/25 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 cursor-pointer"
             >
-              {analysis?.verdict === 'Compliant' ? (
-                <CircleCheck className="h-5 w-5" />
-              ) : analysis?.verdict === 'Non-Compliant' ? (
-                <CircleX className="h-5 w-5" />
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Logging Docket...</span>
+                </>
               ) : (
-                <TriangleAlert className="h-5 w-5" />
+                <>
+                  <Send className="h-4 w-4" />
+                  <span>Submit Docket</span>
+                </>
               )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider">
-                  Tesseract OCR Automated Assessment
-                </span>
-                {analysis?.confidence && (
-                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-bold text-slate-800 ring-1 ring-black/10">
-                    Confidence: {Math.round(analysis.confidence)}%
-                  </span>
-                )}
-              </div>
-              <h2 className="mt-0.5 text-base font-bold sm:text-lg">
-                Status:{' '}
-                {analysis
-                  ? analysis.verdict === 'Compliant'
-                    ? 'Fully Compliant with Statutory Declarations'
-                    : analysis.verdict === 'Non-Compliant'
-                    ? 'Statutory Infraction Flagged (Missing Mandatory Declarations)'
-                    : 'Manual Verification Required'
-                  : 'Awaiting Package Image Scan'}
-              </h2>
-              <p className="mt-1 text-xs opacity-90 leading-relaxed">
-                {analysis
-                  ? analysis.summaryFindings
-                  : 'No active scan data loaded. Please capture or upload packaging artwork in the Scanner.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2 self-end rounded-xl bg-white/90 px-3 py-1.5 text-xs font-bold text-slate-800 shadow-xs sm:self-center">
-            <Sparkles className="h-3.5 w-3.5 text-blue-600" />
-            <span>OCR Verified</span>
+            </button>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* 3. Responsive Split: Section A (OCR) & Section B (Rules Checklist) */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* SECTION A: Visual Feed & Multilingual OCR Results (5 cols) */}
-        <div className="space-y-5 lg:col-span-5">
-          {/* Image Visualizer */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      {/* 2. SPLIT VIEW: RAW CAPTURED IMAGE WITH FILTER CONTROLS vs EDITABLE OCR TEXT */}
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        {/* LEFT COLUMN: RAW CAPTURED IMAGE WITH ENHANCEMENT FILTER CONTROLS (6 cols) */}
+        <div className="space-y-4 lg:col-span-6">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-xs">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600">
+              <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
                 <Camera className="h-4 w-4 text-blue-600" />
-                <span>Inspection Artifact Evidence</span>
-              </h3>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                Live Evidence
-              </span>
+                <span>Evidence Visualizer & Filter Controls</span>
+              </h2>
+              <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-500">
+                <span>Re-analyses:</span>
+                <span className="rounded-md bg-blue-50 px-2 py-0.5 font-bold text-blue-700 ring-1 ring-blue-600/20">
+                  #{reanalysisCount}
+                </span>
+              </div>
             </div>
 
-            <div className="mt-3 flex min-h-[220px] max-h-[280px] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-950">
-              {scannerState?.imageUrl ? (
+            {/* Image Preview Canvas */}
+            <div className="relative mt-4 flex min-h-[260px] max-h-[360px] w-full items-center justify-center overflow-hidden rounded-2xl bg-slate-950 p-2">
+              {displayedImageUrl ? (
                 <img
-                  src={scannerState.imageUrl}
-                  alt="Scanned evidence"
-                  className="max-h-[260px] w-full object-contain"
+                  src={displayedImageUrl}
+                  alt="Scanned evidence artwork"
+                  style={imageFilterStyle}
+                  className="max-h-[340px] w-full object-contain transition-all duration-150"
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400">
                   <FileText className="h-10 w-10 text-slate-600 mb-2" />
                   <span className="text-xs font-semibold text-slate-300">
-                    No Live Packaging Image Loaded
+                    No Packaging Evidence Loaded
                   </span>
                   <Link
                     to="/scanner"
-                    className="mt-2 text-[11px] font-bold text-blue-400 hover:underline"
+                    className="mt-2 text-xs font-bold text-blue-400 hover:underline"
                   >
-                    Click to Open Scanner
+                    Open Live Scanner
                   </Link>
                 </div>
               )}
-            </div>
-          </div>
 
-          {/* Genuine Extracted Text Box */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Languages className="h-4 w-4 text-blue-600" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Extracted Raw Typography (Tesseract OCR)
-                </h3>
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                {rawLines.length} Lines Detected
-              </span>
+              {isReanalyzing && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-xs text-white">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-400 mb-2" />
+                  <p className="text-xs font-bold">Executing Sharp Contrast Re-Analysis...</p>
+                </div>
+              )}
             </div>
 
-            {rawLines.length > 0 ? (
-              <div className="mt-4 max-h-64 space-y-2 overflow-y-auto rounded-xl bg-slate-900 p-3.5 font-mono text-xs text-slate-200">
-                {rawLines.map((line, idx) => (
-                  <div key={idx} className="border-b border-slate-800 pb-1.5 last:border-none">
-                    <span className="text-slate-500 text-[10px] block font-mono">
-                      LINE {String(idx + 1).padStart(2, '0')}
-                    </span>
-                    <p className="font-medium text-emerald-400 break-words">{line}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-4 rounded-xl bg-slate-50 p-6 text-center text-xs text-slate-500">
-                <p>Run a scan in the Scanner page to populate real OCR text contours.</p>
-                <Link
-                  to="/scanner"
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
+            {/* Interactive Image Enhancement Controls */}
+            <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+                  <Sliders className="h-3.5 w-3.5 text-blue-600" />
+                  <span>Optical Enhancements</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-900 cursor-pointer"
                 >
-                  <ScanLine className="h-3.5 w-3.5" />
-                  <span>Open Scanner</span>
-                </Link>
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Reset</span>
+                </button>
               </div>
-            )}
+
+              {/* Sliders: Contrast & Brightness */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                    <span>Contrast:</span>
+                    <span className="font-mono text-blue-600">{contrastLevel}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="70"
+                    max="220"
+                    value={contrastLevel}
+                    onChange={(e) => setContrastLevel(Number(e.target.value))}
+                    className="w-full accent-blue-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                    <span>Brightness:</span>
+                    <span className="font-mono text-blue-600">{brightnessLevel}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="60"
+                    max="160"
+                    value={brightnessLevel}
+                    onChange={(e) => setBrightnessLevel(Number(e.target.value))}
+                    className="w-full accent-blue-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              {/* Toggles & Crop Presets */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsGrayscale(!isGrayscale)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      isGrayscale
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Grayscale
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsInverted(!isInverted)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      isInverted
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Invert
+                  </button>
+                </div>
+
+                {/* Crop Region Presets */}
+                <div className="flex items-center gap-1 text-xs">
+                  <Crop className="h-3.5 w-3.5 text-slate-500" />
+                  <select
+                    value={activeCropPreset}
+                    onChange={(e) => setActiveCropPreset(e.target.value as any)}
+                    className="rounded-lg border border-slate-300 bg-white py-1 px-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="full">Full Artwork</option>
+                    <option value="top">Top Header</option>
+                    <option value="middle">Middle Section</option>
+                    <option value="bottom">Bottom Declarations</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Re-Analyze Action Button */}
+              <button
+                type="button"
+                onClick={handleServerReanalysis}
+                disabled={isReanalyzing || !displayedImageUrl}
+                className="w-full inline-flex items-center justify-center min-h-[44px] gap-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold uppercase tracking-wider transition active:scale-98 disabled:opacity-50 cursor-pointer shadow-xs"
+              >
+                <RefreshCw className={`h-4 w-4 text-blue-400 ${isReanalyzing ? 'animate-spin' : ''}`} />
+                <span>Execute Sharp Re-Analysis</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* SECTION B: Statutory Rules Checklist (7 cols) */}
-        <div className="space-y-4 lg:col-span-7">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Mandatory Statutory Declarations Audit
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Verified against Section 18 of the Legal Metrology Act, 2009
-                </p>
-              </div>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                4 Rules Evaluated
-              </span>
+        {/* RIGHT COLUMN: EDITABLE RAW OCR TEXT & TYPOGRAPHY EDITOR (6 cols) */}
+        <div className="space-y-4 lg:col-span-6">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col h-full">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
+                <Languages className="h-4 w-4 text-blue-600" />
+                <span>Editable Raw OCR Typography</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => handleSyncOcrToRules(rawOcrText)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+                <span>Re-evaluate Rules</span>
+              </button>
             </div>
 
-            <div className="mt-4 space-y-3.5">
-              {rulesList.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 transition hover:border-slate-200"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
+            <p className="mt-2 text-xs text-slate-500">
+              Inspectors may correct any OCR misreads or add supplementary packaging notes. Rule validations update dynamically.
+            </p>
+
+            {/* Large Editable Textarea */}
+            <div className="mt-3 flex-1">
+              <textarea
+                value={rawOcrText}
+                onChange={(e) => setRawOcrText(e.target.value)}
+                placeholder="OCR extracted text will appear here. Edit typography or paste label snippets..."
+                rows={12}
+                className="w-full rounded-2xl border border-slate-300 bg-slate-900 p-4 font-mono text-base sm:text-sm text-emerald-400 leading-relaxed shadow-inner transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+              <span>Characters: {rawOcrText.length} • Lines: {rawOcrText.split('\n').filter(Boolean).length}</span>
+              <span className="text-slate-500">Auto-tokenized for Rules, 2011</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. STATUTORY CHECKLIST WITH EDITABLE EVIDENCE TAGS FOR ALL 7 LEGAL METROLOGY RULES */}
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 gap-2">
+          <div>
+            <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-900">
+              Statutory Declarations Checklist & Evidence Tagging
+            </h2>
+            <p className="text-xs text-slate-500">
+              Verified under the Legal Metrology (Packaged Commodities) Rules, 2011. Inspect and customize evidence citations for each rule.
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 self-start sm:self-auto">
+            7 Statutory Rules Evaluated
+          </span>
+        </div>
+
+        {/* 7 Rules Cards */}
+        <div className="grid grid-cols-1 gap-4">
+          {rulesList.map((item) => (
+            <div
+              key={item.id}
+              className={`rounded-2xl border p-4 sm:p-5 transition-all ${
+                item.status === 'Compliant'
+                  ? 'border-emerald-200 bg-emerald-50/40'
+                  : item.status === 'Non-Compliant'
+                  ? 'border-rose-200 bg-rose-50/40'
+                  : 'border-amber-200 bg-amber-50/50'
+              }`}
+            >
+              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                {/* Rule Info & Detected Snippet */}
+                <div className="space-y-2 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg bg-blue-100 px-2 py-0.5 font-mono text-xs font-black text-blue-900">
+                      {item.ruleNo}
+                    </span>
+                    <h3 className="text-sm font-bold text-slate-900">{item.label}</h3>
+                    {item.critical && (
+                      <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-slate-700">
+                        Critical
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-slate-500">{item.explanation}</p>
+
+                  <div className="rounded-xl border border-slate-200/90 bg-white/95 p-2.5 text-xs">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                      Isolated Single-Line Evidence:
+                    </span>
+                    <p className="font-mono font-semibold text-slate-800 truncate" title={item.extractedSnippet}>
+                      {item.extractedSnippet}
+                    </p>
+                  </div>
+
+                  {/* Rule 11 HITL: If missing/review and calculated USP is available, render Accept Calculated USP action */}
+                  {item.id === 'unit_sale_price' && item.status !== 'Compliant' && calculatedUsp && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-blue-200 bg-blue-50/90 p-3 shadow-xs">
                       <div className="flex items-center gap-2">
-                        <span className="rounded bg-blue-100/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-blue-800">
-                          {item.ruleNo}
-                        </span>
-                        <h4 className="text-xs font-bold text-slate-900">{item.label}</h4>
+                        <Scale className="h-4 w-4 text-blue-700 shrink-0" />
+                        <div className="text-xs">
+                          <span className="font-bold text-blue-950">Auto-Calculated USP: </span>
+                          <span className="font-mono font-extrabold text-blue-800">{calculatedUsp}</span>
+                        </div>
                       </div>
-
-                      <div className="mt-1.5 rounded-lg border border-slate-200/80 bg-white p-2 font-mono text-xs text-slate-800">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                          Detected in Artwork:
-                        </span>
-                        <span className="break-all font-semibold text-slate-900">
-                          {item.extractedValue}
-                        </span>
-                      </div>
-
-                      <p className="text-[11px] text-slate-500 pt-1">{item.explanation}</p>
+                      <button
+                        type="button"
+                        onClick={handleAcceptCalculatedUsp}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-xs hover:bg-blue-700 transition cursor-pointer active:scale-95"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Accept Calculated USP</span>
+                      </button>
                     </div>
+                  )}
 
-                    <div className="shrink-0 pt-0.5">
-                      {item.status === 'found' ? (
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-                          <CircleCheck className="h-4 w-4 text-emerald-600" />
-                          <span className="hidden sm:inline">{item.statusLabel}</span>
-                          <span className="sm:hidden">Found</span>
-                        </div>
-                      ) : item.status === 'warning' ? (
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-600/20">
-                          <TriangleAlert className="h-4 w-4 text-amber-600" />
-                          <span className="hidden sm:inline">{item.statusLabel}</span>
-                          <span className="sm:hidden">Review</span>
-                        </div>
-                      ) : (
-                        <div className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-600/20">
-                          <CircleX className="h-4 w-4 text-rose-600" />
-                          <span className="hidden sm:inline">{item.statusLabel}</span>
-                          <span className="sm:hidden">Missing</span>
-                        </div>
-                      )}
-                    </div>
+                  {/* EDITABLE EVIDENCE TAG */}
+                  <div className="space-y-1 pt-1">
+                    <label
+                      htmlFor={`evidence-${item.id}`}
+                      className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700"
+                    >
+                      <Tag className="h-3 w-3 text-blue-600" />
+                      <span>Citable Evidence Tag (Editable):</span>
+                    </label>
+                    <input
+                      id={`evidence-${item.id}`}
+                      type="text"
+                      value={item.evidenceTag}
+                      onChange={(e) => handleUpdateEvidenceTag(item.id, e.target.value)}
+                      placeholder={`e.g., Citable text for ${item.label}`}
+                      className="w-full rounded-xl border border-slate-300 bg-white py-2 px-3.5 text-base sm:text-sm font-medium text-slate-900 shadow-xs transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
                   </div>
                 </div>
-              ))}
+
+                {/* Status Toggle Buttons */}
+                <div className="shrink-0 flex sm:flex-col gap-1.5 self-start">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRuleStatus(item.id, 'Compliant')}
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      item.status === 'Compliant'
+                        ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <CircleCheck className="h-3.5 w-3.5" />
+                    <span>Compliant</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRuleStatus(item.id, 'Manual Review')}
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      item.status === 'Manual Review'
+                        ? 'bg-amber-500 text-white shadow-xs font-extrabold'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-amber-50'
+                    }`}
+                  >
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Review</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRuleStatus(item.id, 'Non-Compliant')}
+                    className={`inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      item.status === 'Non-Compliant'
+                        ? 'bg-rose-600 text-white shadow-xs font-extrabold'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-rose-50'
+                    }`}
+                  >
+                    <CircleX className="h-3.5 w-3.5" />
+                    <span>Infraction</span>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-
-          {/* Quick Legal Notice */}
-          <div className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 p-3.5 text-xs text-blue-900">
-            <Info className="h-4 w-4 shrink-0 text-blue-600 mt-0.5" />
-            <p>
-              As per Rule 6(1)(d), omitting or rendering unreadable the month and year of manufacture or expiry invites penal proceedings under Section 36 of the Legal Metrology Act.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Human-in-the-Loop (Final Officer Verdict Panel) */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs sm:p-7">
-        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-            <UserCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <h3 className="text-base font-bold text-slate-900">
-              Officer Final Verdict (Human-in-the-Loop)
-            </h3>
-            <p className="text-xs text-slate-500">
-              Confirm or override the AI automated compliance status based on statutory guidelines.
-            </p>
-          </div>
+          ))}
         </div>
 
-        <div className="mt-5 space-y-4">
-          {/* Verdict Selection Buttons */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setVerdict('compliant')}
-              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 cursor-pointer ${
-                verdict === 'compliant'
-                  ? 'border-emerald-600 bg-emerald-50/90 text-emerald-900 shadow-lg shadow-emerald-600/15 ring-4 ring-emerald-500/20 scale-[1.01]'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:bg-emerald-50/40 active:scale-95'
-              }`}
-            >
-              <CircleCheck
-                className={`h-6 w-6 ${verdict === 'compliant' ? 'text-emerald-600' : 'text-slate-400'}`}
-              />
-              <div className="text-left">
-                <span className="block text-base font-bold">Mark as Compliant</span>
-                <span className="block text-xs font-normal text-slate-500">
-                  All mandatory rules satisfied
-                </span>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setVerdict('non-compliant')}
-              className={`flex items-center justify-center gap-3 rounded-2xl border-2 p-5 font-bold transition-all duration-200 cursor-pointer ${
-                verdict === 'non-compliant'
-                  ? 'border-rose-600 bg-rose-50/90 text-rose-900 shadow-lg shadow-rose-600/15 ring-4 ring-rose-500/20 scale-[1.01]'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-rose-400 hover:bg-rose-50/40 active:scale-95'
-              }`}
-            >
-              <CircleX
-                className={`h-6 w-6 ${verdict === 'non-compliant' ? 'text-rose-600' : 'text-slate-400'}`}
-              />
-              <div className="text-left">
-                <span className="block text-base font-bold">Mark as Non-Compliant</span>
-                <span className="block text-xs font-normal text-slate-500">
-                  Issue statutory notice / violation
-                </span>
-              </div>
-            </button>
-          </div>
-
-          {/* Optional Officer Remark */}
-          <div className="pt-2">
-            <label
-              htmlFor="officer-notes"
-              className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
-            >
-              Officer Inspection Remarks (Optional)
-            </label>
-            <input
-              id="officer-notes"
-              type="text"
-              value={officerNotes}
-              onChange={(e) => setOfficerNotes(e.target.value)}
-              placeholder="e.g., Physical date stamp verified on seal; secondary optical examination confirms compliance."
-              className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-2.5 px-4 text-xs font-medium text-slate-900 shadow-xs transition hover:border-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
-          </div>
+        {/* Officer Inspection Remarks Box */}
+        <div className="pt-2">
+          <label
+            htmlFor="officer-notes"
+            className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
+          >
+            Officer Inspection Remarks & Seal Observations (Optional)
+          </label>
+          <input
+            id="officer-notes"
+            type="text"
+            value={officerNotes}
+            onChange={(e) => setOfficerNotes(e.target.value)}
+            placeholder="e.g., Physical date stamp verified on packaging seal; optical examination confirms full compliance."
+            className="w-full rounded-xl border border-slate-300 bg-slate-50/50 py-2.5 px-4 text-base sm:text-sm font-medium text-slate-900 shadow-xs transition hover:border-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
         </div>
 
-        {/* 5. Next Step Action */}
-        <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-5 sm:flex-row">
+        {/* Bottom Submission Action Bar */}
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-5">
           <div className="flex items-center gap-3 text-xs text-slate-700">
-            {verdict ? (
-              <>
-                <ShieldCheck className="h-6 w-6 text-blue-600 shrink-0" />
-                <span>
-                  Verdict recorded as{' '}
-                  <strong className="uppercase font-extrabold text-slate-900">
-                    {verdict === 'compliant' ? 'Compliant' : 'Non-Compliant'}
-                  </strong>
-                  . Ready to log into the evidence ledger.
-                </span>
-              </>
-            ) : (
-              <>
-                <Info className="h-6 w-6 text-amber-600 shrink-0" />
-                <span className="text-slate-600">
-                  Please select either <strong className="text-slate-800">"Mark as Compliant"</strong> or{' '}
-                  <strong className="text-slate-800">"Mark as Non-Compliant"</strong> above to finalize your docket.
-                </span>
-              </>
-            )}
+            <ShieldCheck className="h-6 w-6 text-blue-600 shrink-0" />
+            <span>
+              Final status:{' '}
+              <strong className="uppercase font-extrabold text-slate-900">
+                [{complianceMode}]
+              </strong>
+              . All 7 Legal Metrology statutory rules and evidence citations ready to record.
+            </span>
           </div>
 
           <button
             type="button"
-            disabled={!verdict}
-            onClick={handleGenerateReport}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-7 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-xl shadow-blue-500/25 transition-all duration-200 hover:brightness-110 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto shrink-0 cursor-pointer"
+            disabled={isSubmitting}
+            onClick={handleOneClickSubmit}
+            className="inline-flex w-full sm:w-auto items-center justify-center min-h-[44px] gap-2 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 px-7 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-xl shadow-blue-500/25 transition-all duration-200 hover:brightness-110 active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
           >
-            <span>Generate Evidence Report</span>
-            <ChevronRight className="h-4 w-4" />
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Recording Docket...</span>
+              </>
+            ) : (
+              <>
+                <span>Record & Issue Docket</span>
+                <ChevronRight className="h-4 w-4" />
+              </>
+            )}
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

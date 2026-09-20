@@ -89,10 +89,26 @@ const reportSchema = new mongoose.Schema(
     verdict: {
       type: String,
       enum: {
-        values: ['Compliant', 'Non-Compliant', 'Manual Review'],
-        message: '{VALUE} is not a valid statutory verdict. Must be Compliant, Non-Compliant, or Manual Review',
+        values: ['Compliant', 'Non-Compliant', 'Manual Review', 'COMPLIANT', 'NON_COMPLIANT', 'MANUAL_REVIEW'],
+        message: '{VALUE} is not a valid statutory verdict.',
       },
       default: 'Compliant',
+    },
+    complianceStatus: {
+      type: String,
+      enum: {
+        values: ['COMPLIANT', 'NON_COMPLIANT', 'MANUAL_REVIEW'],
+        message: '{VALUE} is not a valid compliance status. Must be COMPLIANT, NON_COMPLIANT, or MANUAL_REVIEW',
+      },
+      default: 'COMPLIANT',
+    },
+    rawOcrText: {
+      type: String,
+      default: '',
+    },
+    reanalysisCount: {
+      type: Number,
+      default: 0,
     },
     pdfDocumentUrl: {
       type: String,
@@ -115,11 +131,36 @@ const reportSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    suggestedUsp: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Pre-validate hook to keep verdict & complianceStatus synchronized
+reportSchema.pre('validate', function (next) {
+  if (this.complianceStatus && !this.verdict) {
+    if (this.complianceStatus === 'COMPLIANT') this.verdict = 'Compliant';
+    else if (this.complianceStatus === 'NON_COMPLIANT') this.verdict = 'Non-Compliant';
+    else if (this.complianceStatus === 'MANUAL_REVIEW') this.verdict = 'Manual Review';
+  } else if (this.verdict && !this.complianceStatus) {
+    const v = String(this.verdict).toUpperCase();
+    if (v.includes('NON')) this.complianceStatus = 'NON_COMPLIANT';
+    else if (v.includes('REVIEW') || v.includes('MANUAL')) this.complianceStatus = 'MANUAL_REVIEW';
+    else this.complianceStatus = 'COMPLIANT';
+  }
+
+  if (this.extractedText && !this.rawOcrText) {
+    this.rawOcrText = this.extractedText;
+  } else if (this.rawOcrText && !this.extractedText) {
+    this.extractedText = this.rawOcrText;
+  }
+  next();
+});
 
 // Indexes for fast lookup by docketId, state region, officer, and verdict
 reportSchema.index({ docketId: 1 });

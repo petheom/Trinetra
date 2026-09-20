@@ -83,6 +83,10 @@
   .blue-glow {
     box-shadow: 0 12px 32px -8px rgba(37, 99, 235, 0.28);
   }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0.75rem);
+  }
 }
 
 /* Animations */
